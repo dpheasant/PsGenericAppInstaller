@@ -1,0 +1,91 @@
+Function Read-DataTable{
+<#
+.SYNOPSIS
+
+
+.DESCRIPTION
+
+.INPUTS
+None
+
+.OUTPUTS
+
+.EXAMPLE
+
+.NOTES
+
+.LINK
+
+#>
+
+    [CmdletBinding()]
+    param(
+    [Parameter(Position=0, Mandatory=$true)] [string]$ServerInstance,
+    [Parameter(Position=1, Mandatory=$true)] [string]$Database,
+    [Parameter(Position=2, Mandatory=$true)] [string]$TableName,
+    [Parameter(Position=4, Mandatory=$false)] [string]$SQUsername,
+    [Parameter(Position=5, Mandatory=$false)] [string]$SQPassword,
+    [Parameter(Position=6, Mandatory=$false)] [Int32]$BatchSize=50000,
+    [Parameter(Position=7, Mandatory=$false)] [Int32]$QueryTimeout=0,
+    [Parameter(Position=8, Mandatory=$false)] [Int32]$ConnectionTimeout=15,
+    [Parameter(Position=9, Mandatory=$true)] [string]$outfilePath,
+    [Parameter(Position=10, Mandatory=$FALSE)] [string]$Query
+    )
+    
+Write-Host""
+Write-Host""  
+Write-Host "Function Read-Datatable Started; Pulling Data from SQL" -ForegroundColor DarkCyan
+#####################################################################
+
+
+#CSVExportVariable
+$date = get-date -format d
+$time = get-date -format t
+$date = $date.ToString().Replace(“/”, “-”)
+$time = $time.ToString().Replace(":", "-")
+$time = $time.ToString().Replace(" ", "")
+$output1 = $outfilePath + "SQLData" + $date + "_" + $time + "_.csv"
+
+############################Set Variables#######################
+$sql_instance_name = $ServerInstance
+$db_name = $Database
+#$sql_user = $SQUsername
+#$sql_user_pswd = get-content $SQPassword | convertto-securestring
+
+If ($query){
+$query = $query
+}
+Else{
+$query = "select * from $TableName"
+}
+
+############################Query SQL #################################
+
+#Will Run With Credentials of (SQL Authentication - Not WIndows)
+#$expcsv = invoke-sqlcmd -Username $sql_user -Password $sql_user_pswd -Database $db_name -Query $query -serverinstance $sql_instance_name 
+
+
+Write-Host "Exporting Data To Pipeline............." -ForegroundColor Green
+Write-Host "Instance: $sql_instance_name" -ForegroundColor Green
+Write-Host "Query: $query" -ForegroundColor Green
+Write-Host "Database: $db_name" -ForegroundColor Green
+Write-Host "serverinstance: $sql_instance_name" -ForegroundColor Green
+Write-Host "TableName $TableName" -ForegroundColor Green
+
+
+
+$expcsv = invoke-sqlcmd  -Query $query -Database $db_name -serverinstance $sql_instance_name
+
+
+if ($expcsv){
+$expcsv | Export-CSV $output1 -NoTypeInformation
+Return $expcsv
+Write-Host "Read-datatable complete " -ForegroundColor DarkCyan
+
+}#EndIf
+
+Else{
+Write-Host "Export Failed" -ForegroundColor Red
+}#EndIf
+
+}#End Read-DataTable

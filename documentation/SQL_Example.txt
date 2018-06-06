@@ -1,0 +1,89 @@
+Function Write-DataTable{
+<#
+.SYNOPSIS
+
+
+.DESCRIPTION
+
+.INPUTS
+None
+
+.OUTPUTS
+
+.EXAMPLE
+
+.NOTES
+
+.LINK
+
+#>
+
+    [CmdletBinding()]
+    param(
+    [Parameter(Position=0, Mandatory=$true)] [string]$ServerInstance,
+    [Parameter(Position=1, Mandatory=$true)] [string]$Database,
+    [Parameter(Position=2, Mandatory=$true)] [string]$TableName,
+    [Parameter(Position=4, Mandatory=$false)] [string]$SQUsername,
+    [Parameter(Position=5, Mandatory=$false)] [string]$SQPassword,
+    [Parameter(Position=6, Mandatory=$false)] [Int32]$BatchSize=50000,
+    [Parameter(Position=7, Mandatory=$false)] [Int32]$QueryTimeout=0,
+    [Parameter(Position=8, Mandatory=$false)] [Int32]$ConnectionTimeout=15,
+    [Parameter(Position=9, Mandatory=$true)] [string]$outfilePath,
+    [Parameter(Position=10, Mandatory=$true)] [Object]$Data
+    )
+Write-Host""
+Write-Host""
+Write-Host "Function Write-datatable Started; Writing Data from SharePoint" -ForegroundColor DarkCyan
+   
+
+#####################################################################
+$date = get-date -format d
+$time = get-date -format t
+$date = $date.ToString().Replace(“/”, “-”)
+$time = $time.ToString().Replace(":", "-")
+$time = $time.ToString().Replace(" ", "")
+$output1 = ".\" + "G_EXP_" + $date + "_" + $time + "_.csv"
+
+############################Set Variables#######################
+$sql_instance_name = $ServerInstance
+$db_name = $Database
+#$sql_user = $SQUsername
+#$sql_user_pswd = get-content "$SQPassword" | convertto-securestring
+
+
+############################Query SQL #################################
+# Will Work with SQL creds only No Win Authentication
+#-Username $sql_user -Password $sql_user_pswd
+
+Write-Host "Exporting Data To Pipeline............." -ForegroundColor Green
+Write-Host "Instance: $sql_instance_name" -ForegroundColor Green
+Write-Host "Table: $TableName" -ForegroundColor Green
+Write-Host "Database: $db_name" -ForegroundColor Green
+Write-Host "serverinstance: $sql_instance_name" -ForegroundColor Green
+
+
+Foreach($row in $Data){
+$UpdateResults1 = @"
+Update dbo.$TableName
+Set User_Display_Name='$User_Display_Name',CNP_ID='$CNP_ID',OGE_ID='$OGE_ID',Location='$Location',Legacy_Company='$Legacy_Company',Migration_Date='$Migration_Date',`
+Updated_Migration_Date='$Updated_Migration_Date',Scheduler='$Scheduler',[T-14_Date]='$T14_Date',[T-7_Date]='$T7_Date',[T-1_Date]='$T1_Date',[T-0_Date]='$T0_Date',`
+Depot_Migration='$Depot_Migration',Seconded_Employee='$Seconded_Employee',White_Glove='$White_Glove',Modified='$Modified',[Created By]='$Created_By',`
+Computer_Account='$Computer_Account',Computer_Only_Migration='$Computer_Only_Migration',Created='$Created',ID='$ID',[Modified By]='$Modified_By',`
+Remote_User='$Remote_User',Enable_ID='$Enable_ID',[T+1_Date]='$Tplus1_Date',User_Email='$User_Email'`
+Where ID='$ID'`
+Else`
+INSERT INTO dbo.PRDLISTDATA VALUES ($User_Display_Name,$CNP_ID,$OGE_ID,$Location,$Legacy_Company,$Migration_Date,$Reschedule,$Updated_Migration_Date`
+      ,$Scheduler,$T14_Date,$T7_Date,$T1_Date,$T0_Date,$User_Migration_Complete,$Computer_Migration_Complete,$Depot_Migration,$Seconded_Employee,$White_Glove`
+      ,$Modified,$Computer_Account,$Computer_Only_Migration,$Created,$Created_By,$DMM_Sync,$ID,$Isolation_TS_Complete,$Modified_By,$PingTest,$Remote_User`
+      ,$Requires_ConfigMgr_Remediation,$Requires_Post_Migration_Remediation,$Requires_Post_Migration_RUM,$TS_Media_Prestaged,$Updated_Computer_Account`
+      ,$Enable_ID,$Tplus1_Date,$User_Email);
+"@
+
+
+
+
+
+invoke-sqlcmd  -Database $db_name -serverinstance $sql_instance_name -Query $UpdateResults1
+
+}
+} #End Write-DataTable
