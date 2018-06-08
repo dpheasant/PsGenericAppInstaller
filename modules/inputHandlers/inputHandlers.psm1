@@ -59,27 +59,10 @@ function Import-Targets {
             } else {
                 throw ("Unable to find site command for site {0}." -f $target.siteId)
             }
-
         }
+        return $targets
     }
     catch {
         throw $_
     }
-
-    return $targets
 }
-
-
-            # ## look up the target's site ID by matching it's ip to the site's CIDR address
-            # $siteFound = $false
-            # foreach($site in $sites) {
-            #     if(Test-CidrMembership $target.ip $site.networkCidr) {
-            #         $siteFound = $true
-            #         $target.siteId   = $site.id
-            #         $target.siteCidr = $site.networkCidr
-            #     }
-            # }
-
-            # if(-not $siteFound) {
-            #     throw ("Unable to find site for target {0}({1})." -f $target.fqdn,$target.ip)
-            # }
