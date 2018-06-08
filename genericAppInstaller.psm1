@@ -6,24 +6,23 @@
 
 #region INSTALL
 
+import-module $(join-path "modules" "inputHandlers")
+
 <#
     Function will take in paths for 3 input CSVs: FQDN, network map, site commands
     Will import CSVs in PSObjects
-
 #>
 function start-installation {
     [cmdletBinding()]
     param(
         $targets,
         $sites,
-        $siteCommands
+        $siteCommands, 
+        $parallelism = 150
     )
 
     ## import the list of targets
-
-    ## import the list of sites and map each target to it's site
-
-    ## import the list of site commands and map to each target
+    $targets = import-targets -targetsFile $targets -sitesFile $sites -siteCommandsFile $siteCommands
 
     ## result will be an object that looks like this:
     ##   - FQDN
@@ -33,8 +32,25 @@ function start-installation {
     ##   - etc... (basically any other columns from above files)
 
     ## perform pre-req checks
+    foreach($target in $targets) {
+        ## temporarily add a random 'sleepTime' value to each target as a mockup
+        ## for job management
+        $sleepTime = get-random -min 10 -max 120
+        $target | add-member -type NoteProperty -name sleepTime -value $sleepTime
+    }
 
-    ## start initial jobs
+    ## build the job queue
+    $jobQueue = New-Object System.Collections.Queue -ArgumentList $targets
+
+    ## start the jobs
+    while(test-jobSlotFree) {
+        ## clean up any completed jobs
+
+        ## start new jobs
+
+        ## sleep
+
+    }
 
     ## loop until done
 

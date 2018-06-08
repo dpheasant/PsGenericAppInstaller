@@ -2,7 +2,6 @@ $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $sut = (Split-Path -Leaf $MyInvocation.MyCommand.Path) -replace '\.Tests\.ps1', '.'
 import-module -Force "$here"
 
-
 Describe "InputHandlers: Get-Targets" {
     It "throws FileNotFoundException when an input file does not exist" {
         { import-targets -targetsFile fake.csv -sitesFile ./test_sites.csv -siteCommandsFile ./test_siteCommands.csv } | Should -throw -ExceptionType ([System.IO.FileNotFoundException])
