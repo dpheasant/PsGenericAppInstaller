@@ -1,6 +1,6 @@
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$sut = (Split-Path -Leaf $MyInvocation.MyCommand.Path) -replace '\.Tests\.ps1', '.'
-import-module -Force "$here"
+$sut = (Split-Path -Leaf $MyInvocation.MyCommand.Path) -replace '\.Tests\.ps1', '.psm1'
+import-module -Force (resolve-path "$here/$sut")
 
 Describe "InputHandlers: Get-Targets" {
     It "throws FileNotFoundException when an input file does not exist" {

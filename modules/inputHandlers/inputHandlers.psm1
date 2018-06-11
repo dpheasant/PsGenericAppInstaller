@@ -1,28 +1,28 @@
-
 ## import dependencies
-import-module (Join-Path '..' 'utils')
+$here = Split-Path -Parent $MyInvocation.MyCommand.Path
+import-module -Force (resolve-path "$here/../utils")
 
 ## map object/powershell property names to the CSV columns
 $TARGET_PROPERTY_MAP = @(
-    @{Name="ip"   ;  Expression = {$_."ip"}},
-    @{Name="fqdn" ;  Expression = {$_."fqdn"}},
+    @{Name="ip"   ; Expression = {$_."ip"}},
+    @{Name="fqdn" ; Expression = {$_."fqdn"}},
     "siteId",
     "siteCidr",
     "command"
 )
 
 $SITE_PROPERTY_MAP = @(
-    @{Name="id"         ;  Expression = {$_."Site ID"}},
-    @{Name="networkCidr";  Expression = {$_."Network CIDR"}}
+    @{Name="id"         ; Expression = {$_."Site ID"}},
+    @{Name="networkCidr"; Expression = {$_."Network CIDR"}}
 )
 
 $SITE_COMMANDS_PROPERTY_MAP = @(
-    @{Name="siteId"  ;  Expression = {$_."Site ID"}},
-    @{Name="logfileRegex"    ;  Expression = {$_."Logfile Regex"}},
-    @{Name="logfileParser"   ;  Expression = {$_."Logfile Search Script"}},
-    @{Name="packageLocation" ;  Expression = {$_."Package Location"}},
-    @{Name="command" ;  Expression = {$_."Execution Command Line"}},
-    @{Name="logfile" ;  Expression = {$_."Installed Logfile Location"}}
+    @{Name="siteId"  ; Expression = {$_."Site ID"}},
+    @{Name="logfileRegex"    ; Expression = {$_."Logfile Regex"}},
+    @{Name="logfileParser"   ; Expression = {$_."Logfile Search Script"}},
+    @{Name="packageLocation" ; Expression = {$_."Package Location"}},
+    @{Name="command" ; Expression = {$_."Execution Command Line"}},
+    @{Name="logfile" ; Expression = {$_."Installed Logfile Location"}}
 )
 
 <#
@@ -30,8 +30,13 @@ $SITE_COMMANDS_PROPERTY_MAP = @(
 #>
 function Import-Targets {
     Param(
+        [Parameter(Mandatory=$true)]
         [String] $targetsFile,
+
+        [Parameter(Mandatory=$true)]
         [String] $sitesFile,
+
+        [Parameter(Mandatory=$true)]
         [String] $siteCommandsFile
     )
 
@@ -46,7 +51,6 @@ function Import-Targets {
             ## look up the target's site ID by matching it's ip to the site's CIDR address
             $site = $sites | where-object { Test-CidrMembership $target.ip $_.networkCidr }
             if($site) {
-                $siteFound = $true
                 $target.siteId   = $site.id
                 $target.siteCidr = $site.networkCidr
             } else {
