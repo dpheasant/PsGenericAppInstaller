@@ -3,7 +3,7 @@ $logShowLevel  = "debug"
 New-Alias log write-log -Force
 
 $clientDataSample = New-Object -Type psObject -Property @{
-    'fqdn'                = 'mo-util01.ad.qtrsystems.net'
+    'fqdn'                = 'mgmt01.lab2.qtr.ad'
     'siteId'              = 'Site1'
     'logFileRegEx'        = 'Client installation completed SUCCESSFULLY'
     'logFileSearchScript' = ''
@@ -14,11 +14,104 @@ $clientDataSample = New-Object -Type psObject -Property @{
     'detectionScript'     = 'Test-Path HKLM:\SYSTEM\Software\'
 }
 
+function start-clientIntallTasks () {
+    [cmdletBinding()]
+    param (
+        [parameter(mandatory = $true, valueFromPipeline = $true, position = 0)]
+        [psObject]$clientData,
+        [string]$serverStagingPath = $env:TEMP,
+        [string]$clientInstallLocation = "$env:TEMP\clientInstall\",
+        [psCredential]$sessionCredential,
+        [ValidateSet("Basic","Credssp","Default","Digest","Kerberos","Negotiate","NegotiateWithImplicitCredential")]
+        [string]$sessionAuth
+    )
+
+    begin {
+        $pSDefaultParameterValues = @{'log:invocationName' = $myInvocation.invocationName
+                                      'log:logShowLevel'   = $logShowLevel
+                                      'log:outputType'     = $logOutPutType}
+        "Starting client install tasks." | log
+        $clientStatusObject = New-Object -Type psObject
+        "Client output status object created." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
+    }
+
+    process {
+        "Starting client pre-requisite checks." | log
+        $testPreRequisites = $clientData.fqdn | test-preRequisites
+        "Client pre-requisite checks complete." | log
+        $clientStatusObject | Add-Member -MemberType NoteProperty -Name clientFqdn -Value $testPreRequisites.clientFqdn
+        $clientStatusObject | Add-Member -MemberType NoteProperty -Name dnsTest -Value $testPreRequisites.dnsTest
+        if (!$clientStatusObject.dnsTest) {
+            $message = "DNS Test for $($testPreRequisites.clientFqdn) is False! Ending job."
+            $message | log -l 2
+            Throw $message
+        }
+        $clientStatusObject | Add-Member -MemberType NoteProperty -Name connectionTest -Value $testPreRequisites.connectionTest
+         if (!$clientStatusObject.connectionTest) {
+            $message = "Connection (ping) Test for $($testPreRequisites.clientFqdn) is False! Ending job."
+            $message | log -l 2
+            Throw $message
+        }
+        $clientStatusObject | Add-Member -MemberType NoteProperty -Name remotePsTest -Value $testPreRequisites.remotePsTest
+         if (!$clientStatusObject.remotePsTest) {
+            $message = "Remote PowerShell Test for $($testPreRequisites.clientFqdn) is False! Ending job."
+            $message | log -l 2
+            Throw $message
+        }
+        $clientStatusObject | Add-Member -MemberType NoteProperty -Name smbTest -Value $testPreRequisites.smbTest
+         if (!$clientStatusObject.dnsTest) {
+            "SMB Test for $($testPreRequisites.clientFqdn) is False!" | log -l 3
+        }
+        "Added pre-requsite checks to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
+        Write-Output $clientStatusObject
+        "All pre-requisite checks for $($testPreRequisites.clientFqdn) suceeded! Continuing installation." | log
+
+        "Establishing powershell session to $($testPreRequisites.clientFqdn)." | log
+        $newPsSessionParams = @{
+            clientData             = $clientData
+            removeExistingSessions = $true
+        }
+        if ($sessionCredential) {$newPsSessionParams.Add('sessionCredential',$sessionCredential)}
+        if ($sessionAuth) {$newPsSessionParams.Add('sessionAuth',$sessionAuth)}
+        "PS Session parameters created for $($testPreRequisites.clientFqdn)." | log -l 6 -cf @{'psSessionParams' = $newPsSessionParams}
+        $clientPsSession = new-clientPsSession @newPsSessionParams
+        "New PowerShell Session to $($testPreRequisites.clientFqdn) estabished." | log
+        $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'psSessionId' -Value $clientPsSession.id
+        Write-Output $clientStatusObject
+        "PowerShell session properties: " | log -l 6 -cf @{'psSessionProperties' = $clientPsSession}
+
+        "Testing package install state on $($testPreRequisites.clientFqdn)." | log
+        $packageInstallScriptBlock = (Get-Command test-packageInstalled).ScriptBlock
+        $invokeCmdParams = @{
+            session      = $clientPsSession
+            scriptBlock  = $packageInstallScriptBlock
+            argumentList = $clientData.packageID
+        }
+        $testPackageInstall = Invoke-Command @invokeCmdParams
+
+        "Setting environment on $($testPreRequisites.clientFqdn)." | log
+        $setEnvParams = @{
+            clientPSSession = $clientPsSession
+            force           = $true
+        }
+        "Set Environment parameters created for $($testPreRequisites.clientFqdn)." | log -l 6 -cf @{'psSessionParams' = $setEnvParams}
+        $setClientEnv = set-clientEnvironment @setEnvParams
+        "Environment set on $($testPreRequisites.clientFqdn)." | log
+        $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'remoteDirectory' -Value $setClientEnv
+        Write-Output $clientStatusObject 
+
+    }
+
+    end {
+        return $clientStatusObject
+    }
+}
+
 function set-clientEnvironment () {
     [cmdletBinding()]
     param (
         [parameter(mandatory = $true)]
-        [psSession]$clientPSSession,
+        $clientPSSession,
         [string]$clientInstallLocation = "$env:TEMP\clientInstall\",
         [switch]$force
     )
@@ -61,8 +154,6 @@ function set-clientEnvironment () {
         return $clientInstallLocation
     }
 }
-
-
 
 function copy-installConfigFile () {
     [cmdletBinding()]
@@ -227,7 +318,7 @@ function new-clientPsSession () {
     }
 
     process {
-        if ($closeExistingSessions) {
+        if ($removeExistingSessions) {
             $currentSessions = Get-PSSession
             $currentSessions = $currentSessions | Where-Object {$_.computerName -eq $clientData.fqdn}
             if ($currentSessions) {
@@ -259,19 +350,78 @@ function test-installProcessRunning ([string]$executionCmdLine) {
 }
 
 function test-packageInstalled ([string]$packageID,[scriptBlock]$detectionScript) {
-    $result = $false
-
+    $packageIDResult = $false
     if ($packageID) {
-
+        $packageIDs = Get-WmiObject Win32_Product | Select-Object Name, IdentifyingNumber
+        $matches = $packageIDs | Where-Object {$_.identifyingNumber -match $packageID}
+        if ($matches) {
+            $packageIDResult = $true
+        }
     }
 
+    $detectionScriptResult = $false
     if ($detectionScript) {
-
+        $detectionScriptResult =  Invoke-Command -ScriptBlock $detectionScript
     }
+
+    if (($packageID -and $packageIDResult) -and ($detectionScript -and $detectionScriptResult)) {
+        $installed = $true
+    } elseif (!$packageID -and ($detectionScript -and $detectionScriptResult)) {
+        $installed = $true
+    } elseif (($packageID -and $packageIDResult) -and !$detectionScript) {
+        $installed = $true
+    } else {
+        $installed = $false
+    }
+
+    return $installed
+}
+
+function new-clientScheduledTask ([string]$taskName,[string]$scriptPath) {
+
+    $taskCommand = 'powerShell'
+    $taskArg = $scriptPath
+ 
+    $service = New-Object -ComObject("Schedule.Service")
+
+    $service.Connect()
+    $rootFolder                               = $service.GetFolder("\")
+    $taskDefinition                           = $service.newTask(0) 
+    $taskDefinition.settings.enabled          = $true
+    $taskDefinition.settings.allowDemandStart = $true
+ 
+    $action           = $taskDefinition.actions.Create(0)
+    $action.path      = "$taskCommand"
+    $action.Arguments = "$taskArg"
+ 
+    $register = $rootFolder.registerTaskDefinition("$taskName",$taskDefinition,6,"System",$null,5)
+
+    return $register
+}
+
+function get-scheduledTaskStatus ([string]$taskPath) {
+    $taskStatusLine = schtasks /query /tn $taskPath /fo list | Select-String "Status:"
+    $status         = (([regex]'(?<=\:        ).*$').matches($taskStatusLine)).value
+    return $status
+}
+
+function remove-clientScheduledTask ([string]$taskPath) {
+    $removeTask = schtasks /delete /tn $taskPath /f
+}
+
+function new-installerCopyScript ([string]$sourcePath,[string]$destinationPath,[string]$stagingPath) {
+    $copyString = "Copy-Item -Path $sourcePath -Destination $destinationPath"
+    $fileName   = Join-Path $stagingPath -ChildPath "clientInstallerCopy.ps1"
+    $copyString | Out-File -FilePath $fileName -Encoding utf8 -Force
+    return $fileName
 }
 
 function install-clientPackage () {
     Write-Output "Installing..."
+}
+
+function get-clientData () {
+
 }
 
 function test01 () {

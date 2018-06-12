@@ -1,5 +1,5 @@
 ﻿$logOutPutType = "CSV"
-$logShowLevel  = "debug"
+$logShowLevel  = "info"
 New-Alias log write-log -Force
 
 
@@ -69,12 +69,13 @@ function test-preRequisites () {
                                       'log:outputType'     = $logOutPutType}
         $testPreReqResult = "" | Select-Object "clientFqdn","dnsTest","connectionTest","remotePsTest","smbTest"
         "Test Result psObject created." | log -l 6 -cf @{'testPreReqResult' = $testPreReqResult}
-        "Starting pre-requisites test for client: $clientFQDN" | log
-        $testPreReqResult.clientFqdn = $clientFQDN
-        "Client FQDN set." | log -l 6 -cf @{'testPreReqResult' = $testPreReqResult}
     }
 
     process {
+        "Starting pre-requisites test for client: $clientFQDN" | log
+        $testPreReqResult.clientFqdn = $clientFQDN
+        "Client FQDN set." | log -l 6 -cf @{'testPreReqResult' = $testPreReqResult}
+
         "Starting dns test for $clientFQDN." | log
         $dnsTestParams = @{ clientFqdn = $clientFQDN }
         if ($dnsServer) {$dnsTestParams.Add("dnsServer",$dnsServer); "Using dns server: $dnsServer" | log}
