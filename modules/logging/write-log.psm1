@@ -42,6 +42,8 @@
    "timestamp","level","function","message","Example"
     "Thursday, June 7, 2018 11:14:00 AM","error","test-function","Log Message","1"
 
+.INPUTS
+
 .PARAMETER message
     This is the log message string.
 .PARAMETER level
@@ -122,7 +124,7 @@ function write-log () {
                         value      = $customField[$_]
                     }
                     $output | Add-Member @memberParams
-                    $consoleOutput += "`t$_ = $($customField[$_])"
+                    $consoleOutput += "`t$_ = $($customField[$_] | Out-String)"
                 })
             }
 
