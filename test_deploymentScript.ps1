@@ -23,14 +23,10 @@ function new-status {
     return $status
 }
 
-$iterations = get-random -min 2 -max 20
+$iterations = get-random -min 2 -max 5
 
-write-host ("STATUS: Sleeping for 1 sec {0} times." -f $iterations)
-
-foreach($i in 1..$iterations) {   
-    write-host ("STATUS: iteration {0}" -f $i)
-
-    new-status -state 'looping' -message "I'm looping heeah..." -iteration $i -InputObject $InputObject
+foreach($i in 1..$iterations) {
+    new-status -state 'looping' -message "I'm loopin' heeah..." -iteration $i -InputObject $InputObject
 
     start-sleep -Seconds 1
 }
