@@ -10,7 +10,7 @@ $clientDataSample = New-Object -Type psObject -Property @{
     'logFileLocation'     = "$env:TEMP\LogFileExample.txt"
     'executionCmdLine'    = 'msiexec /I AdaptivaP2PClientInstaller.msi /q SERVERNAME=c0004513.corp.ds.fedex.com SOURCEUNCPATH=\\c0005280.corp.ds.fedex.com\source$\adaptiva\AdaptivaClientSetup.exe WAITFORCOMPLETION=1'
     'packageLocation'     = '\\c0005280.corp.ds.fedex.com\source$\adaptiva\'
-    'packageID'           = 'B57097EF-5F38-348C-8081-4D0F0B78757E'
+    'packageID'           = '715E251E-9134-3D1D-BE19-1C6EE18F8D24'
     'detectionScript'     = 'Test-Path HKLM:\SYSTEM\Software\'
 }
 
@@ -23,23 +23,33 @@ function start-clientIntallTasks () {
         [string]$clientInstallLocation = "$env:TEMP\clientInstall\",
         [psCredential]$sessionCredential,
         [ValidateSet("Basic","Credssp","Default","Digest","Kerberos","Negotiate","NegotiateWithImplicitCredential")]
-        [string]$sessionAuth
+        [string]$sessionAuth,
+        [switch]$noLogSearch,
+        [int]$installTestWaitInterval = 10,
+        [int]$installRunningTestWaitInterval = 10,
+        [int]$maxInstallTestCount = 9999,
+        [string]$smbValidationTaskName = "smbValidate",
+        [int]$scheduledTaskCheckWaitInterval = 10,
+        [int]$maxScheduledTaskMonitorCount = 9999
     )
 
     begin {
         $pSDefaultParameterValues = @{'log:invocationName' = $myInvocation.invocationName
                                       'log:logShowLevel'   = $logShowLevel
                                       'log:outputType'     = $logOutPutType}
+        
+    }
+    process {
         "Starting client install tasks." | log
         $clientStatusObject = New-Object -Type psObject
-        "Client output status object created." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
-    }
+        $clientStatusObject = $clientData
+        $clientStatusObject | Add-Member -MemberType NoteProperty -Name '_TYPE' -Value 'data'
+        "Added _TYPE property with data flag to output object." | log
+        "Client output status object created with input client data." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
 
-    process {
         "Starting client pre-requisite checks." | log
         $testPreRequisites = $clientData.fqdn | test-preRequisites
         "Client pre-requisite checks complete." | log
-        $clientStatusObject | Add-Member -MemberType NoteProperty -Name clientFqdn -Value $testPreRequisites.clientFqdn
         $clientStatusObject | Add-Member -MemberType NoteProperty -Name dnsTest -Value $testPreRequisites.dnsTest
         if (!$clientStatusObject.dnsTest) {
             $message = "DNS Test for $($testPreRequisites.clientFqdn) is False! Ending job."
@@ -59,13 +69,13 @@ function start-clientIntallTasks () {
             Throw $message
         }
         $clientStatusObject | Add-Member -MemberType NoteProperty -Name smbTest -Value $testPreRequisites.smbTest
-         if (!$clientStatusObject.dnsTest) {
+         if (!$clientStatusObject.smbTest) {
             "SMB Test for $($testPreRequisites.clientFqdn) is False!" | log -l 3
         }
         "Added pre-requsite checks to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
         Write-Output $clientStatusObject
         "All pre-requisite checks for $($testPreRequisites.clientFqdn) suceeded! Continuing installation." | log
-
+        
         "Establishing powershell session to $($testPreRequisites.clientFqdn)." | log
         $newPsSessionParams = @{
             clientData             = $clientData
@@ -77,28 +87,229 @@ function start-clientIntallTasks () {
         $clientPsSession = new-clientPsSession @newPsSessionParams
         "New PowerShell Session to $($testPreRequisites.clientFqdn) estabished." | log
         $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'psSessionId' -Value $clientPsSession.id
+        "Added psSessionId to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
         Write-Output $clientStatusObject
         "PowerShell session properties: " | log -l 6 -cf @{'psSessionProperties' = $clientPsSession}
 
-        "Testing package install state on $($testPreRequisites.clientFqdn)." | log
-        $packageInstallScriptBlock = (Get-Command test-packageInstalled).ScriptBlock
+        "Gathering client data for $($clientData.fqdn)." | log
+        $clientDataScriptBlock = (Get-Command get-clientData).ScriptBlock
         $invokeCmdParams = @{
             session      = $clientPsSession
-            scriptBlock  = $packageInstallScriptBlock
-            argumentList = $clientData.packageID
+            scriptBlock  = $clientData
+            argumentList = ""
         }
-        $testPackageInstall = Invoke-Command @invokeCmdParams
+        $clientData = Invoke-Command @invokeCmdParams
+        "Client data gathering complete." | log
+        $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'clientData' -Value $clientData
+        "Added client data to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
+        Write-Output $clientStatusObject
 
-        "Setting environment on $($testPreRequisites.clientFqdn)." | log
-        $setEnvParams = @{
-            clientPSSession = $clientPsSession
-            force           = $true
+        $testCount = 1
+        while ($testCount -le $maxInstallTestCount) {
+            "Testing for running install process with input command line." | log -cf @{cmdLine = $clientData.executionCmdLine}
+            $installRunningScriptBlock = (Get-Command test-installProcessRunning).ScriptBlock
+            $invokeCmdParams = @{
+                session      = $clientPsSession
+                scriptBlock  = $installRunningScriptBlock
+                argumentList = $clientData.executionCmdLine
+            }
+            $installRunningTest = Invoke-Command @invokeCmdParams
+            "Package Install running test complete." | log
+            $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'installRunning' -Value $installRunningTest -Force
+            "Added package install running test result to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
+            Write-Output $clientStatusObject
+            if ($installRunningTest) {
+                "Package Installation with command `"$($clientData.executionCmdLine)`" currently running. Waiting for $installRunningTestWaitInterval seconds." | log
+                Start-Sleep -Seconds $installRunningTestWaitInterval
+                "Wait interval completed. Contuing test loop with test count $testCount (of $maxInstallTestCount)." | log
+                $testCount++
+                if (!$noLogSearch) {
+                    "Evaulating `"$($clientData.logFileLocation)`" against provided search script and regEx parameters." | log
+                    $logSearchScriptBlock = (Get-Command get-logSearchResults).ScriptBlock
+                    $searchScriptBlock    = [scriptBlock]::Create("$($clientData.logFileSearchScript)")
+                    $invokeCmdParams = @{
+                        session      = $clientPsSession
+                        scriptBlock  = $logSearchScriptBlock
+                        argumentList = $clientData.logFileLocation,$clientData.logFileRegEx,$clientData.logFileSearchScript
+                    }
+                    "Log Search parameters created." | log -l 6 -cf @{logSearchParams = $invokeCmdParams}
+                    $logSearch = Invoke-Command @invokeCmdParams
+                    "Log search complete." | log
+                    $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'logSearchRegExResults' -Value $logSearch.regExMatch -Force
+                    $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'logSearchScriptResults' -Value $logSearch.scriptMatch -Force
+                    "Added log search results to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
+                    Write-Output $clientStatusObject
+                }
+                Continue
+            }
+            
+            "Testing package install state on $($testPreRequisites.clientFqdn)." | log
+            $packageInstallScriptBlock = (Get-Command test-packageInstalled).ScriptBlock
+            $invokeCmdParams = @{
+                session      = $clientPsSession
+                scriptBlock  = $packageInstallScriptBlock
+                argumentList = $clientData.packageID,$clientData.detectionScript
+            }
+            $testPackageInstall = Invoke-Command @invokeCmdParams
+            "Completed test package install state on $($testPreRequisites.clientFqdn). Result: $testPackageInstall" | log
+            $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'packageInstallTest' -Value $testPackageInstall -Force
+            "Added package install test result to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
+            Write-Output $clientStatusObject
+
+            if ($testPackageInstall) {
+                "Package installed! Breaking out of test." | log
+                if (!$noLogSearch) {
+                    "Evaulating `"$($clientData.logFileLocation)`" against provided search script and regEx parameters." | log
+                    $logSearchScriptBlock = (Get-Command get-logSearchResults).ScriptBlock
+                    $searchScriptBlock    = [scriptBlock]::Create("$($clientData.logFileSearchScript)")
+                    $invokeCmdParams = @{
+                        session      = $clientPsSession
+                        scriptBlock  = $logSearchScriptBlock
+                        argumentList = $clientData.logFileLocation,$clientData.logFileRegEx,$clientData.logFileSearchScript
+                    }
+                    "Log Search parameters created." | log -l 6 -cf @{logSearchParams = $invokeCmdParams}
+                    $logSearch = Invoke-Command @invokeCmdParams
+                    "Log search complete." | log
+                    $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'logSearchRegExResults' -Value $logSearch.regExMatch -Force
+                    $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'logSearchScriptResults' -Value $logSearch.scriptMatch -Force
+                    "Added log search results to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
+                    Write-Output $clientStatusObject
+                }
+                Break
+            } else {
+                "Setting environment on $($testPreRequisites.clientFqdn)." | log
+                $setEnvParams = @{
+                    clientPSSession = $clientPsSession
+                    force           = $false
+                }
+                "Set Environment parameters created for $($testPreRequisites.clientFqdn)." | log -l 6 -cf @{'psSessionParams' = $setEnvParams}
+                $setClientEnv = set-clientEnvironment @setEnvParams
+                "Environment set on $($testPreRequisites.clientFqdn)." | log
+                $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'remoteDirectory' -Value $setClientEnv
+                Write-Output $clientStatusObject
+
+                "Validating UNC path `"$($clientData.packageLocation)`" from client." | log
+                $validateSmbLogPath = Join-Path $clientInstallLocation -ChildPath "smbValidateLog.txt"
+                $validateSMBParams = @{
+                    uncPath     = $clientData.packageLocation
+                    logFilePath = $validateSmbLogPath
+                }
+                $clientScript = new-validateSMBScriptString @validateSMBParams
+                "Writing client smb validation script to  to client." | log
+                $copyScriptParams = @{
+                    scriptString          = $clientScript
+                    fileName              = "smbValidate.ps1"
+                    clientPSSession       = $clientPsSession
+                    clientInstallLocation = $clientInstallLocation
+                    fileStagingLocation   = $serverStagingPath
+                }
+                "Copy client script parameters created." | log -l 6 -cf @{copyScriptParams = $copyScriptParams}
+                $writeScript = copy-clientInstallScript @copyScriptParams
+                "Copied SMB validation script to remote client." | log
+                "Creating scheduled task on client to run smb validation script as local system." | log
+                $schedTaskCreateScriptBlock = (Get-Command new-clientScheduledTask).scriptBlock
+                $invokeCmdParams = @{
+                    session      = $clientPsSession
+                    scriptBlock  = $schedTaskCreateScriptBlock
+                    argumentList = $smbValidationTaskName,$writeScript.destination
+                }
+                $createSchedTask = Invoke-Command @invokeCmdParams
+                "Completed create smb validation task on remote client." | log
+                $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'smbValidationStatus' -Value "Task Created" -Force
+                "Added smb validation task status to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
+                Write-Output $clientStatusObject
+                "Running scheduled task `"$smbValidationTaskName`" on remote client." | log
+                $schedTaskRunScriptBlock = (Get-Command start-clientScheduledTask).scriptBlock
+                $invokeCmdParams = @{
+                    session      = $clientPsSession
+                    scriptBlock  = $schedTaskRunScriptBlock
+                    argumentList = "/$smbValidationTaskName"
+                }
+                $runSchedTask = Invoke-Command @invokeCmdParams
+                "Completed run smb validation task on remote client." | log
+                $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'smbValidationStatus' -Value "Task Started" -Force
+                "Updated smb validation task status to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
+                Write-Output $clientStatusObject
+                "Preparing to monitor scheduled task `"$smbValidationTaskName`" on remote client." | log
+                $schedTaskMonitorScriptBlock = (Get-Command get-scheduledTaskStatus).scriptBlock
+                $invokeCmdParams = @{
+                    session      = $clientPsSession
+                    scriptBlock  = $schedTaskMonitorScriptBlock
+                    argumentList = "/$smbValidationTaskName"
+                }
+                $monitorCount = 1
+                do {
+                    "Monitoring scheduled task `"$smbValidationTaskName`" on remote client." | log
+                    $monitorSchedTask = Invoke-Command @invokeCmdParams
+                    "Scheduled task `"$smbValidationTaskName`" current status: $monitorSchedTask." | log
+                    "Completed monitor `"$smbValidationTaskName`" task number $monitorCount (of $maxScheduledTaskMonitorCount) on remote client." | log
+                    $monitorCount++
+                    switch ($monitorSchedTask) {
+                        "Running" {
+                            $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'smbValidationStatus' -Value "Task Running" -Force
+                            "Updated smb validation task status to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
+                        }
+                        "Ready" {
+                            $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'smbValidationStatus' -Value "Task Complete" -Force
+                            "Updated smb validation task status to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
+                        }
+                        default {
+                            "Scheduled task `"$smbValidationTaskName`" run failed. Cannot confirm if client can connect to $($clientData.packageLocation)." | log -l 3
+                            $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'smbValidationStatus' -Value "Task Failed" -Force
+                            "Updated smb validation task status to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
+                        }
+                    }
+                    Write-Output $clientStatusObject
+                    "Starting sleep for $scheduledTaskCheckWaitInterval seconds before re-checking scheduled task $smbValidationTaskName." | log
+                    Start-Sleep -Seconds $scheduledTaskCheckWaitInterval
+                } until ($monitorSchedTask -eq "Ready" -or ($monitorCount -eq $maxScheduledTaskMonitorCount))
+                "Removing scheduled task `"$smbValidationTaskName`"." | log
+                $schedTaskRemoveScriptBlock = (Get-Command remove-clientScheduledTask).scriptBlock
+                $invokeCmdParams = @{
+                    session      = $clientPsSession
+                    scriptBlock  = $schedTaskRemoveScriptBlock
+                    argumentList = "/$smbValidationTaskName"
+                }
+                $removeSchedTask = Invoke-Command @invokeCmdParams
+                "Completed remove `"$smbValidationTaskName`" task on remote client." | log
+                $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'smbValidationStatus' -Value "Task Removed" -Force
+                "Updated smb validation task status to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
+                Write-Output $clientStatusObject
+                "Evaluating scheduled task `"$smbValidationTaskName`"result." | log
+                $smbTaskEvaluateScriptblock = [scriptBlock]::Create("Get-Content -Path $validateSmbLogPath")
+                $invokeCmdParams = @{
+                    session      = $clientPsSession
+                    scriptBlock  = $smbTaskEvaluateScriptblock
+                }
+                $evalSchedTask = Invoke-Command @invokeCmdParams
+                "Completed evaluate task `"$smbValidationTaskName`" task on remote client. Result: $evalSchedTask" | log
+                $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'smbValidationResult' -Value $evalSchedTask -Force
+                "Updated smb validation task status to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
+                switch ($evalSchedTask) {
+                    "True" {
+                        "SMB validation from remote client to $($clientData.packageLocation) suceeded!" | log
+                        $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'smbValidation' -Value $true -Force
+                        "Updated smb validation task status to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
+                    }
+                    "False" {
+                        "SMB validation from remote client to $($clientData.packageLocation) failed! Client cannot install package" | log -l 2
+                        $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'smbValidation' -Value $false -Force
+                        "Updated smb validation task status to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
+                        Write-Output $clientStatusObject
+                        Throw "SMB validation from remote client to $($clientData.packageLocation) failed! Client cannot install package"
+                    }
+                    default {
+                        "Unable to validate remote client connectivity to $($clientData.packageLocation)." | log -l 3
+                        $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'smbValidation' -Value 'Unknown' -Force
+                        "Updated smb validation task status to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
+                    }
+                }
+                Write-Output $clientStatusObject
+                
+
+
+            }       
         }
-        "Set Environment parameters created for $($testPreRequisites.clientFqdn)." | log -l 6 -cf @{'psSessionParams' = $setEnvParams}
-        $setClientEnv = set-clientEnvironment @setEnvParams
-        "Environment set on $($testPreRequisites.clientFqdn)." | log
-        $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'remoteDirectory' -Value $setClientEnv
-        Write-Output $clientStatusObject 
 
     }
 
@@ -227,13 +438,13 @@ function copy-installConfigFile () {
     }
 }
 
-function copy-installScript () {
+function copy-clientInstallScript () {
     [cmdletBinding()]
     param (
-        [parameter(mandatory = $true, valueFromPipeline = $true, position = 0)]
-        [psObject]$clientData,
         [parameter(mandatory = $true)]
-        [string]$functionName,
+        [string[]]$scriptString,
+        [parameter(mandatory = $true)]
+        [string]$fileName,
         [parameter(mandatory = $true)]
         [psSession]$clientPSSession,
         [string]$clientInstallLocation = "$env:TEMP\clientInstall\",
@@ -244,19 +455,19 @@ function copy-installScript () {
         $pSDefaultParameterValues = @{'log:invocationName' = $myInvocation.invocationName
                                       'log:logShowLevel'   = $logShowLevel
                                       'log:outputType'     = $logOutPutType}
-        $fileNameWithExt = "$functionName.ps1"
-        $stagingFilePath = Join-Path $fileStagingLocation -ChildPath $fileNameWithExt
-        $clientFilePath  = Join-Path $clientInstallLocation -ChildPath $fileNameWithExt
+
+        $stagingFilePath = Join-Path $fileStagingLocation -ChildPath $fileName
+        $clientFilePath  = Join-Path $clientInstallLocation -ChildPath $fileName
     }
 
     process {
-        $functionCode = (Get-Command -Name $functionName).definition
-        $functionFileParams = @{
-            filePath = $stagingFilePath
-            encoding = "utf8"
-            force    = $true
+        $scriptFileParams = @{
+            filePath    = $stagingFilePath
+            encoding    = "utf8"
+            force       = $true
+            inputObject = $scriptString
         }
-        $createFileStaging = $functionCode | Out-File @functionFileParams
+        $createFileStaging = Out-File @scriptFileParams
 
         $copyItemParams = @{
             path        = $stagingFilePath
@@ -405,6 +616,10 @@ function get-scheduledTaskStatus ([string]$taskPath) {
     return $status
 }
 
+function start-clientScheduledTask ([string]$taskPath) {
+    $startTask = schtasks /run /tn $taskPath
+}
+
 function remove-clientScheduledTask ([string]$taskPath) {
     $removeTask = schtasks /delete /tn $taskPath /f
 }
@@ -418,6 +633,34 @@ function new-installerCopyScript ([string]$sourcePath,[string]$destinationPath,[
 
 function install-clientPackage () {
     Write-Output "Installing..."
+}
+
+function get-logSearchResults ([string]$logFilePath,[string]$logRegEx,[scriptBlock]$logFileSearchScript) {
+    $matches = @{
+        regExMatch  = $null
+        scriptMatch = $null
+    }
+    $pathTest = Test-Path $logFilePath
+    if ($pathTest) {
+        if ($logRegEx) {
+            $regExmatch = (([regex]$logRegEx).matches((Get-Content -Path $logFilePath))).value
+            $matches.regExMatch = $regExmatch
+        }
+        if ($logFileSearchScript) {
+            $scriptMatch = Invoke-Command -ScriptBlock $logFileSearchScript
+            $matches.scriptMatch = $scriptMatch
+        }
+    } else {
+        "Path to $logFilePath not valid!" | log -l 3
+    }
+    return $matches
+}
+
+function new-validateSMBScriptString ([string]$uncPath,[string]$logFilePath) {
+    [string[]]$testSMBString = "`$testUncPath = Test-Path `"$uncPath`""
+    $testSMBString += "`$testUncPath | Out-File -FilePath $logFilePath -Encoding utf8 -Force"
+    
+    return $testSMBString
 }
 
 function get-clientData () {

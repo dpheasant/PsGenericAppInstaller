@@ -202,7 +202,9 @@ function test-connection () {
             warningAction    = "silentlyContinue"
         }
         try {
+            $ProgressPreference=’SilentlyContinue’
             $connectionTest = Test-NetConnection @connectionParams -ErrorAction Stop
+            $ProgressPreference=’Continue’
         } catch {}
     }
 
@@ -234,7 +236,9 @@ function test-tcpPort () {
             warningAction    = "silentlyContinue"
         }
         try {
+            $ProgressPreference=’SilentlyContinue’
             $tcpPortTest = Test-NetConnection @tcpPortParams -ErrorAction Stop
+            $ProgressPreference=’Continue’
         } catch {}
     }
 
