@@ -420,7 +420,26 @@ function install-clientPackage () {
     Write-Output "Installing..."
 }
 
+
+# i.    Time
+# ii.   Date
+# iii.  System Name
+# iv.   IP address
+# v.    Pending Reboot Status
+# vi.   Disk Space
+# vii.  Network info
+# viii. Limited Installed Program list (TBD)
 function get-clientData () {
+
+    $dateTime = Get-Date
+    $client   = get-wmiobject win32_computersystem
+    $fqdn     = ("{0}.{1}" -f $client.name,$client.domain)
+
+    $rebootStatus = 
+    $diskInfo   = 
+    $networkInfo = (Get-WmiObject win32_networkadapterconfiguration -Filter 'ipenabled = "true"').ipaddress | ?{$_ -like '*.*.*.*'}
+    $installedPrograms = 
+
 
 }
 

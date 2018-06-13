@@ -3,7 +3,6 @@ Param(
     $InputObject
 )
 
-
 ## creates a status object
 function new-status {
     Param(

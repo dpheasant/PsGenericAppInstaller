@@ -5,9 +5,9 @@ import-module -Force (resolve-path "$here/$sut")
 Describe "GenericAppInstaller: Start-Installation" {
 
     $results = start-installation `
-        -targets './modules/inputHandlers/test_targets.csv' `
-        -sites   './modules/inputHandlers/test_sites.csv' `
-        -siteCommands './modules/inputHandlers/test_siteCommands.csv' `
+        -targetsFile './modules/inputHandlers/test_targets.csv' `
+        -sitesFile   './modules/inputHandlers/test_sites.csv' `
+        -siteCommandsFile './modules/inputHandlers/test_siteCommands.csv' `
         -installScript 'test_deploymentScript.ps1'
 
     It "correctly runs 50 jobs" {
