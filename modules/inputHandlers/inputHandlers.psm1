@@ -19,10 +19,13 @@ $SITE_PROPERTY_MAP = @(
 $SITE_COMMANDS_PROPERTY_MAP = @(
     @{Name="siteId"  ; Expression = {$_."Site ID"}},
     @{Name="logfileRegex"    ; Expression = {$_."Logfile Regex"}},
-    @{Name="logfileParser"   ; Expression = {$_."Logfile Search Script"}},
+    @{Name="logFileSearchScript"   ; Expression = {$_."Logfile Search Script"}},
     @{Name="packageLocation" ; Expression = {$_."Package Location"}},
-    @{Name="command" ; Expression = {$_."Execution Command Line"}},
-    @{Name="logfile" ; Expression = {$_."Installed Logfile Location"}}
+    @{Name="executionCmdLine" ; Expression = {$_."Execution Command Line"}},
+    @{Name="logFileLocation" ; Expression = {$_."Installed Logfile Location"}}
+    @{Name="packageID" ; Expression = {$_."Package ID"}}
+    @{Name="detectionScript" ; Expression = {$_."Detection Script"}}
+    @{Name="outputPath" ; Expression = {$_."Output File Location"}}
 )
 
 <#
