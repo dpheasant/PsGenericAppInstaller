@@ -8,8 +8,15 @@ $TARGET_PROPERTY_MAP = @(
     @{Name="fqdn" ; Expression = {$_."fqdn"}},
     "siteId",
     "siteCidr",
+    "logfileRegex",
+    "logFileSearchScript",
+    "packageLocation",
     "executionCmdLine",
+    "logFileLocation",
+    "packageID",
+    "detectionScript",
     "outputPath"
+
 )
 
 $SITE_PROPERTY_MAP = @(
