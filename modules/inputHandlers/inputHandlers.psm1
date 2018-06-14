@@ -64,6 +64,17 @@ function Import-Targets {
             $siteCommand = $siteCommands | Where-Object { $target.siteId -eq $_.siteId }
             if($siteCommand) {
                 $target.executionCmdLine = $siteCommand
+
+                $target.siteId              = $siteCommand.siteId
+                $target.logfileRegex        = $siteCommand.logfileRegex
+                $target.logFileSearchScript = $siteCommand.logFileSearchScript
+                $target.packageLocation     = $siteCommand.packageLocation
+                $target.executionCmdLine    = $siteCommand.executionCmdLine
+                $target.logFileLocation     = $siteCommand.logFileLocation
+                $target.packageID           = $siteCommand.packageID
+                $target.detectionScript     = $siteCommand.detectionScript
+                $target.outputPath          = $siteCommand.outputPath
+
             } else {
                 throw ("Unable to find site command for site {0}." -f $target.siteId)
             }
