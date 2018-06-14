@@ -2,15 +2,16 @@
 $logShowLevel  = "debug"
 New-Alias log write-log -Force
 
+$clientDataSample = $null
 $clientDataSample = New-Object -Type psObject -Property @{
-    'fqdn'                = 'mgmt01.lab2.qtr.ad'
+    'fqdn'                = 'ws04.lab2.qtr.ad'
     'siteId'              = 'Site1'
     'logFileRegEx'        = 'Client installation completed SUCCESSFULLY'
     'logFileSearchScript' = ''
-    'logFileLocation'     = "$env:TEMP\LogFileExample.txt"
-    'executionCmdLine'    = 'msiexec /I AdaptivaP2PClientInstaller.msi /q SERVERNAME=c0004513.corp.ds.fedex.com SOURCEUNCPATH=\\c0005280.corp.ds.fedex.com\source$\adaptiva\AdaptivaClientSetup.exe WAITFORCOMPLETION=1'
-    'packageLocation'     = '\\c0005280.corp.ds.fedex.com\source$\adaptiva\'
-    'packageID'           = '715E251E-9134-3D1D-BE19-1C6EE18F8D24'
+    'logFileLocation'     = "$env:TEMP\AdaptivaClientSetup.LOG"
+    'executionCmdLine'    = 'msiexec /i \\file01\share02\msi\npp.msi /q /norestart'
+    'packageLocation'     = '\\file01\share02\msi\'
+    'packageID'           = '622E78B5-9B2F-412D-86CD-FDD72A3154BA'
     'detectionScript'     = 'Test-Path HKLM:\SYSTEM\Software\'
 }
 
@@ -29,6 +30,7 @@ function start-clientIntallTasks () {
         [int]$installRunningTestWaitInterval = 10,
         [int]$maxInstallTestCount = 9999,
         [string]$smbValidationTaskName = "smbValidate",
+        [string]$msiInstallTaskName = "msiInstall",
         [int]$scheduledTaskCheckWaitInterval = 10,
         [int]$maxScheduledTaskMonitorCount = 9999
     )
@@ -90,20 +92,22 @@ function start-clientIntallTasks () {
         "Added psSessionId to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
         Write-Output $clientStatusObject
         "PowerShell session properties: " | log -l 6 -cf @{'psSessionProperties' = $clientPsSession}
-
+        
         "Gathering client data for $($clientData.fqdn)." | log
         $clientDataScriptBlock = (Get-Command get-clientData).ScriptBlock
         $invokeCmdParams = @{
             session      = $clientPsSession
-            scriptBlock  = $clientData
-            argumentList = ""
+            scriptBlock  = $clientDataScriptBlock
         }
-        $clientData = Invoke-Command @invokeCmdParams
+        $clientPollingData = Invoke-Command @invokeCmdParams
         "Client data gathering complete." | log
-        $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'clientData' -Value $clientData
+        $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'clientData_networkInfo' -Value $clientPollingData.networkInfo
+        $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'clientData_installedPrograms' -Value $clientPollingData.installedPrograms
+        $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'clientData_diskInfo' -Value $clientPollingData.diskInfo
+        $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'clientData_pendingReboot' -Value $clientPollingData.pendingReboot
         "Added client data to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
         Write-Output $clientStatusObject
-
+        
         $testCount = 1
         while ($testCount -le $maxInstallTestCount) {
             "Testing for running install process with input command line." | log -cf @{cmdLine = $clientData.executionCmdLine}
@@ -134,6 +138,7 @@ function start-clientIntallTasks () {
                     }
                     "Log Search parameters created." | log -l 6 -cf @{logSearchParams = $invokeCmdParams}
                     $logSearch = Invoke-Command @invokeCmdParams
+                    "Log search regex results: $($logSearch.regExMatch). Log search script results: $($logSearch.scriptMatch)." | log -l 6 -cf @{logSearch = $logSearch}
                     "Log search complete." | log
                     $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'logSearchRegExResults' -Value $logSearch.regExMatch -Force
                     $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'logSearchScriptResults' -Value $logSearch.scriptMatch -Force
@@ -161,7 +166,6 @@ function start-clientIntallTasks () {
                 if (!$noLogSearch) {
                     "Evaulating `"$($clientData.logFileLocation)`" against provided search script and regEx parameters." | log
                     $logSearchScriptBlock = (Get-Command get-logSearchResults).ScriptBlock
-                    $searchScriptBlock    = [scriptBlock]::Create("$($clientData.logFileSearchScript)")
                     $invokeCmdParams = @{
                         session      = $clientPsSession
                         scriptBlock  = $logSearchScriptBlock
@@ -169,6 +173,7 @@ function start-clientIntallTasks () {
                     }
                     "Log Search parameters created." | log -l 6 -cf @{logSearchParams = $invokeCmdParams}
                     $logSearch = Invoke-Command @invokeCmdParams
+                    "Log search regex results: $($logSearch.regExMatch). Log search script results: $($logSearch.scriptMatch)." | log -l 6 -cf @{logSearch = $logSearch}
                     "Log search complete." | log
                     $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'logSearchRegExResults' -Value $logSearch.regExMatch -Force
                     $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'logSearchScriptResults' -Value $logSearch.scriptMatch -Force
@@ -213,6 +218,7 @@ function start-clientIntallTasks () {
                     scriptBlock  = $schedTaskCreateScriptBlock
                     argumentList = $smbValidationTaskName,$writeScript.destination
                 }
+                "Create scheduled task $smbValidationTaskName parameters defined." | log -l 6 -cf @{invokeCmdParams = $invokeCmdParams}
                 $createSchedTask = Invoke-Command @invokeCmdParams
                 "Completed create smb validation task on remote client." | log
                 $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'smbValidationStatus' -Value "Task Created" -Force
@@ -223,8 +229,9 @@ function start-clientIntallTasks () {
                 $invokeCmdParams = @{
                     session      = $clientPsSession
                     scriptBlock  = $schedTaskRunScriptBlock
-                    argumentList = "/$smbValidationTaskName"
+                    argumentList = "\$smbValidationTaskName"
                 }
+                "Run scheduled task $smbValidationTaskName parameters defined." | log -l 6 -cf @{invokeCmdParams = $invokeCmdParams}
                 $runSchedTask = Invoke-Command @invokeCmdParams
                 "Completed run smb validation task on remote client." | log
                 $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'smbValidationStatus' -Value "Task Started" -Force
@@ -235,8 +242,9 @@ function start-clientIntallTasks () {
                 $invokeCmdParams = @{
                     session      = $clientPsSession
                     scriptBlock  = $schedTaskMonitorScriptBlock
-                    argumentList = "/$smbValidationTaskName"
+                    argumentList = "\$smbValidationTaskName"
                 }
+                "Monitor scheduled task $smbValidationTaskName parameters defined." | log -l 6 -cf @{invokeCmdParams = $invokeCmdParams}
                 $monitorCount = 1
                 do {
                     "Monitoring scheduled task `"$smbValidationTaskName`" on remote client." | log
@@ -268,8 +276,9 @@ function start-clientIntallTasks () {
                 $invokeCmdParams = @{
                     session      = $clientPsSession
                     scriptBlock  = $schedTaskRemoveScriptBlock
-                    argumentList = "/$smbValidationTaskName"
+                    argumentList = "\$smbValidationTaskName"
                 }
+                "Remove scheduled task $smbValidationTaskName parameters defined." | log -l 6 -cf @{invokeCmdParams = $invokeCmdParams}
                 $removeSchedTask = Invoke-Command @invokeCmdParams
                 "Completed remove `"$smbValidationTaskName`" task on remote client." | log
                 $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'smbValidationStatus' -Value "Task Removed" -Force
@@ -281,6 +290,7 @@ function start-clientIntallTasks () {
                     session      = $clientPsSession
                     scriptBlock  = $smbTaskEvaluateScriptblock
                 }
+                "Evaluate scheduled task $smbValidationTaskName parameters defined." | log -l 6 -cf @{invokeCmdParams = $invokeCmdParams}
                 $evalSchedTask = Invoke-Command @invokeCmdParams
                 "Completed evaluate task `"$smbValidationTaskName`" task on remote client. Result: $evalSchedTask" | log
                 $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'smbValidationResult' -Value $evalSchedTask -Force
@@ -305,12 +315,96 @@ function start-clientIntallTasks () {
                     }
                 }
                 Write-Output $clientStatusObject
-                
 
-
+                "Executing msi install for $($clientData.fqdn)." | log
+                "Writing msi install script to client." | log
+                $copyScriptParams = @{
+                    scriptString          = $clientData.executionCmdLine
+                    fileName              = "msiInstall.ps1"
+                    clientPSSession       = $clientPsSession
+                    clientInstallLocation = $clientInstallLocation
+                    fileStagingLocation   = $serverStagingPath
+                }
+                "Copy script for $msiInstallTaskName parameters defined." | log -l 6 -cf @{copyScriptParams = $copyScriptParams}
+                "Copy client script parameters created." | log -l 6 -cf @{copyScriptParams = $copyScriptParams}
+                $writeMsiScript = copy-clientInstallScript @copyScriptParams
+                "Copied msi install script to remote client." | log
+                "Creating scheduled task on client to run msi install script as local system." | log
+                $schedTaskCreateScriptBlock = (Get-Command new-clientScheduledTask).scriptBlock
+                $invokeCmdParams = @{
+                    session      = $clientPsSession
+                    scriptBlock  = $schedTaskCreateScriptBlock
+                    argumentList = $msiInstallTaskName,$writeMsiScript.destination
+                }
+                "Create scheduled task $msiInstallTaskName parameters defined." | log -l 6 -cf @{invokeCmdParams = $invokeCmdParams}
+                $createSchedTask = Invoke-Command @invokeCmdParams
+                "Completed create msi install scheduled task on remote client." | log
+                $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'msiInstallStatus' -Value "Task Created" -Force
+                "Added msi install task status to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
+                Write-Output $clientStatusObject
+                "Running scheduled task `"$msiInstallTaskName`" on remote client." | log
+                $schedTaskRunScriptBlock = (Get-Command start-clientScheduledTask).scriptBlock
+                $invokeCmdParams = @{
+                    session      = $clientPsSession
+                    scriptBlock  = $schedTaskRunScriptBlock
+                    argumentList = "\$msiInstallTaskName"
+                }
+                "Run scheduled task $msiInstallTaskName parameters defined." | log -l 6 -cf @{invokeCmdParams = $invokeCmdParams}
+                $runSchedTask = Invoke-Command @invokeCmdParams
+                "Completed run msi install task on remote client." | log
+                $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'msiInstallStatus' -Value "Task Started" -Force
+                "Updated msi install task status to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
+                Write-Output $clientStatusObject
+                "Preparing to monitor scheduled task `"$msiInstallTaskName`" on remote client." | log
+                $schedTaskMonitorScriptBlock = (Get-Command get-scheduledTaskStatus).scriptBlock
+                $invokeCmdParams = @{
+                    session      = $clientPsSession
+                    scriptBlock  = $schedTaskMonitorScriptBlock
+                    argumentList = "\$msiInstallTaskName"
+                }
+                "Monitor scheduled task $msiInstallTaskName parameters defined." | log -l 6 -cf @{invokeCmdParams = $invokeCmdParams}
+                $monitorCount = 1
+                do {
+                    "Monitoring scheduled task `"$msiInstallTaskName`" on remote client." | log
+                    $monitorSchedTask = Invoke-Command @invokeCmdParams
+                    "Scheduled task `"$msiInstallTaskName`" current status: $monitorSchedTask." | log
+                    "Completed monitor `"$msiInstallTaskName`" task number $monitorCount (of $maxScheduledTaskMonitorCount) on remote client." | log
+                    $monitorCount++
+                    switch ($monitorSchedTask) {
+                        "Running" {
+                            $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'msiInstallStatus' -Value "Task Running" -Force
+                            "Updated msi install task status to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
+                        }
+                        "Ready" {
+                            $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'msiInstallStatus' -Value "Task Complete" -Force
+                            "Updated msi install task status to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
+                        }
+                        default {
+                            "Scheduled task `"$msiInstallTaskName`" run failed. Cannot confirm if client can execute `"$($clientData.executionCmdLine)`"." | log -l 3
+                            $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'msiInstallStatus' -Value "Task Failed" -Force
+                            "Updated msi install task status to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
+                        }
+                    }
+                    Write-Output $clientStatusObject
+                    "Starting sleep for $scheduledTaskCheckWaitInterval seconds before re-checking scheduled task $msiInstallTaskName." | log
+                    Start-Sleep -Seconds $scheduledTaskCheckWaitInterval
+                } until ($monitorSchedTask -eq "Ready" -or ($monitorCount -eq $maxScheduledTaskMonitorCount))
+                "Removing scheduled task `"$smbValidationTaskName`"." | log
+                $schedTaskRemoveScriptBlock = (Get-Command remove-clientScheduledTask).scriptBlock
+                $invokeCmdParams = @{
+                    session      = $clientPsSession
+                    scriptBlock  = $schedTaskRemoveScriptBlock
+                    argumentList = "\$msiInstallTaskName"
+                }
+                "Remove scheduled task $msiInstallTaskName parameters defined." | log -l 6 -cf @{invokeCmdParams = $invokeCmdParams}
+                $removeSchedTask = Invoke-Command @invokeCmdParams
+                "Completed remove `"$msiInstallTaskName`" task on remote client." | log
+                $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'msiInstallStatus' -Value "Task Removed" -Force
+                "Updated smb validation task status to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
+                Write-Output $clientStatusObject
+                "Completed msi install command task on $($clientData.fqdn)." | log
             }       
         }
-
     }
 
     end {
@@ -372,7 +466,7 @@ function copy-installConfigFile () {
         [parameter(mandatory = $true, valueFromPipeline = $true, position = 0)]
         [psObject]$clientData,
         [parameter(mandatory = $true)]
-        [psSession]$clientPSSession,
+        [psObject]$clientPSSession,
         [string]$clientInstallLocation = "$env:TEMP\clientInstall\",
         [string]$fileStagingLocation = $env:TEMP,
         [string]$fileName = "clientInstallConfig"
@@ -446,7 +540,7 @@ function copy-clientInstallScript () {
         [parameter(mandatory = $true)]
         [string]$fileName,
         [parameter(mandatory = $true)]
-        [psSession]$clientPSSession,
+        [psObject]$clientPSSession,
         [string]$clientInstallLocation = "$env:TEMP\clientInstall\",
         [string]$fileStagingLocation = $env:TEMP
     )
@@ -560,7 +654,7 @@ function test-installProcessRunning ([string]$executionCmdLine) {
     }
 }
 
-function test-packageInstalled ([string]$packageID,[scriptBlock]$detectionScript) {
+function test-packageInstalled ([string]$packageID,[string[]]$detectionScript) {
     $packageIDResult = $false
     if ($packageID) {
         $packageIDs = Get-WmiObject Win32_Product | Select-Object Name, IdentifyingNumber
@@ -572,7 +666,8 @@ function test-packageInstalled ([string]$packageID,[scriptBlock]$detectionScript
 
     $detectionScriptResult = $false
     if ($detectionScript) {
-        $detectionScriptResult =  Invoke-Command -ScriptBlock $detectionScript
+        $detectionScriptBlock = [scriptBlock]::Create($detectionScript)
+        $detectionScriptResult =  Invoke-Command -ScriptBlock $detectionScriptBlock
     }
 
     if (($packageID -and $packageIDResult) -and ($detectionScript -and $detectionScriptResult)) {
@@ -611,17 +706,18 @@ function new-clientScheduledTask ([string]$taskName,[string]$scriptPath) {
 }
 
 function get-scheduledTaskStatus ([string]$taskPath) {
-    $taskStatusLine = schtasks /query /tn $taskPath /fo list | Select-String "Status:"
-    $status         = (([regex]'(?<=\:        ).*$').matches($taskStatusLine)).value
+    $taskStatusLine = schtasks /query /tn "$taskPath" /fo list | Select-String "Status:"
+    $statusValue    = ([regex]'(?<=\:        ).*$').matches($taskStatusLine) | Select-Object value
+    $status         = $statusValue.value
     return $status
 }
 
 function start-clientScheduledTask ([string]$taskPath) {
-    $startTask = schtasks /run /tn $taskPath
+    $startTask = schtasks /run /tn "$taskPath"
 }
 
 function remove-clientScheduledTask ([string]$taskPath) {
-    $removeTask = schtasks /delete /tn $taskPath /f
+    $removeTask = schtasks /delete /tn "$taskPath" /f
 }
 
 function new-installerCopyScript ([string]$sourcePath,[string]$destinationPath,[string]$stagingPath) {
@@ -635,23 +731,25 @@ function install-clientPackage () {
     Write-Output "Installing..."
 }
 
-function get-logSearchResults ([string]$logFilePath,[string]$logRegEx,[scriptBlock]$logFileSearchScript) {
+function get-logSearchResults ([string]$logFilePath,[string]$logRegEx,[string[]]$logFileSearchScript) {
     $matches = @{
         regExMatch  = $null
         scriptMatch = $null
     }
-    $pathTest = Test-Path $logFilePath
+    $pathTest = Test-Path "$logFilePath"
     if ($pathTest) {
         if ($logRegEx) {
-            $regExmatch = (([regex]$logRegEx).matches((Get-Content -Path $logFilePath))).value
+            $regExmatch = ([regex]"$logRegEx").matches((Get-Content -Path $logFilePath)) | Select-Object value
             $matches.regExMatch = $regExmatch
         }
         if ($logFileSearchScript) {
-            $scriptMatch = Invoke-Command -ScriptBlock $logFileSearchScript
+            $logFileSearchScriptBlock = [scriptBlock]::Create($logFileSearchScript)
+            $scriptMatch = Invoke-Command -ScriptBlock $logFileSearchScriptBlock
             $matches.scriptMatch = $scriptMatch
         }
     } else {
-        "Path to $logFilePath not valid!" | log -l 3
+       $matches.regExMatch = "Path Failed"
+       $matches.scriptMatch = "Path Failed"
     }
     return $matches
 }
@@ -678,6 +776,130 @@ function get-clientData () {
     $system   = get-wmiobject win32_computersystem
     $fqdn     = ("{0}.{1}" -f $system.name,$system.domain)
 
+    function Get-PendingReboot { 
+    [CmdletBinding()] 
+    param( 
+        [Parameter(Position=0,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)] 
+        [Alias("CN","Computer")] 
+        [String[]]$ComputerName="$env:COMPUTERNAME", 
+        [String]$ErrorLog 
+    ) 
+ 
+    Process { 
+        Foreach ($Computer in $ComputerName) { 
+        Try { 
+            ## Setting pending values to false to cut down on the number of else statements 
+            $CompPendRen,$PendFileRename,$Pending,$SCCM = $false,$false,$false,$false 
+       
+            ## Setting CBSRebootPend to null since not all versions of Windows has this value 
+            $CBSRebootPend = $null 
+             
+            ## Querying WMI for build version 
+            $WMI_OS = Get-WmiObject -Class Win32_OperatingSystem -Property BuildNumber, CSName -ComputerName $Computer -ErrorAction Stop 
+ 
+            ## Making registry connection to the local/remote computer 
+            $HKLM = [UInt32] "0x80000002" 
+            $WMI_Reg = [WMIClass] "\\$Computer\root\default:StdRegProv" 
+             
+            ## If Vista/2008 & Above query the CBS Reg Key 
+            If ([Int32]$WMI_OS.BuildNumber -ge 6001) { 
+            $RegSubKeysCBS = $WMI_Reg.EnumKey($HKLM,"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\") 
+            $CBSRebootPend = $RegSubKeysCBS.sNames -contains "RebootPending"     
+            } 
+               
+            ## Query WUAU from the registry 
+            $RegWUAURebootReq = $WMI_Reg.EnumKey($HKLM,"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\") 
+            $WUAURebootReq = $RegWUAURebootReq.sNames -contains "RebootRequired" 
+             
+            ## Query PendingFileRenameOperations from the registry 
+            $RegSubKeySM = $WMI_Reg.GetMultiStringValue($HKLM,"SYSTEM\CurrentControlSet\Control\Session Manager\","PendingFileRenameOperations") 
+            $RegValuePFRO = $RegSubKeySM.sValue 
+ 
+            ## Query ComputerName and ActiveComputerName from the registry 
+            $ActCompNm = $WMI_Reg.GetStringValue($HKLM,"SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName\","ComputerName")       
+            $CompNm = $WMI_Reg.GetStringValue($HKLM,"SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName\","ComputerName") 
+            If ($ActCompNm -ne $CompNm) { 
+            $CompPendRen = $true 
+            } 
+             
+            ## If PendingFileRenameOperations has a value set $RegValuePFRO variable to $true 
+            If ($RegValuePFRO) { 
+            $PendFileRename = $true 
+            } 
+ 
+            ## Determine SCCM 2012 Client Reboot Pending Status 
+            ## To avoid nested 'if' statements and unneeded WMI calls to determine if the CCM_ClientUtilities class exist, setting EA = 0 
+            $CCMClientSDK = $null 
+            $CCMSplat = @{ 
+                NameSpace='ROOT\ccm\ClientSDK' 
+                Class='CCM_ClientUtilities' 
+                Name='DetermineIfRebootPending' 
+                ComputerName=$Computer 
+                ErrorAction='Stop' 
+            } 
+            ## Try CCMClientSDK 
+            Try { 
+                $CCMClientSDK = Invoke-WmiMethod @CCMSplat 
+            } Catch [System.UnauthorizedAccessException] { 
+                $CcmStatus = Get-Service -Name CcmExec -ComputerName $Computer -ErrorAction SilentlyContinue 
+                If ($CcmStatus.Status -ne 'Running') { 
+                Write-Warning "$Computer`: Error - CcmExec service is not running." 
+                $CCMClientSDK = $null 
+            } 
+            } Catch { 
+        $CCMClientSDK = $null 
+            } 
+ 
+            If ($CCMClientSDK) { 
+                If ($CCMClientSDK.ReturnValue -ne 0) { 
+            Write-Warning "Error: DetermineIfRebootPending returned error code $($CCMClientSDK.ReturnValue)"     
+            } 
+            If ($CCMClientSDK.IsHardRebootPending -or $CCMClientSDK.RebootPending) { 
+            $SCCM = $true 
+            } 
+            } 
+       
+            Else { 
+                $SCCM = $null 
+            } 
+ 
+            ## Creating Custom PSObject and Select-Object Splat 
+            $SelectSplat = @{ 
+                Property=( 
+                    'Computer', 
+                    'CBServicing', 
+                    'WindowsUpdate', 
+                    'CCMClientSDK', 
+                    'PendComputerRename', 
+                    'PendFileRename', 
+                    'PendFileRenVal', 
+                    'RebootPending' 
+                )} 
+            New-Object -TypeName PSObject -Property @{ 
+            Computer=$WMI_OS.CSName 
+            CBServicing=$CBSRebootPend 
+            WindowsUpdate=$WUAURebootReq 
+            CCMClientSDK=$SCCM 
+            PendComputerRename=$CompPendRen 
+            PendFileRename=$PendFileRename 
+            PendFileRenVal=$RegValuePFRO 
+            RebootPending=($CompPendRen -or $CBSRebootPend -or $WUAURebootReq -or $SCCM -or $PendFileRename) 
+                } | Select-Object @SelectSplat 
+ 
+            } Catch { 
+                Write-Warning "$Computer`: $_" 
+                ## If $ErrorLog, log the file to a user specified location/path 
+                If ($ErrorLog) { 
+            Out-File -InputObject "$Computer`,$_" -FilePath $ErrorLog -Append 
+                }         
+            }       
+            }## End Foreach ($Computer in $ComputerName)       
+        }## End Process 
+ 
+    End {  }## End End 
+ 
+}
+
     $rebootStatus  = Get-PendingReboot
     $pendingReboot = $false
     if($rebootStatus.rebootPending -and (-not ($rebootStatus.PendComputerRename -or $rebootStatus.PendFileRename))){
@@ -685,7 +907,7 @@ function get-clientData () {
     }
 
     $diskInfo    = (Get-WmiObject Win32_LogicalDisk -Filter 'driveType = 3' | select-object  -Property DeviceId,FreeSpace,Size)
-    $networkInfo = (Get-WmiObject win32_networkadapterconfiguration -Filter 'ipenabled = "true"').ipaddress | ?{$_ -like '*.*.*.*'}
+    $networkInfo = (Get-WmiObject win32_networkadapterconfiguration -Filter 'ipenabled = "true"').ipaddress | ?{$_ -like '*.*.*.*' -and $_ -notlike '169.*.*.*'}
     $installedPrograms = get-wmiobject win32_product  | select-object -Property Name,IdentifyingNumber,version
 
     $data = new-object -type PSObject -Property @{
@@ -700,228 +922,3 @@ function get-clientData () {
     return $data
 }
 
-Function Get-PendingReboot 
-{ 
-<# 
-.SYNOPSIS 
-    Gets the pending reboot status on a local or remote computer. 
- 
-.DESCRIPTION 
-    This function will query the registry on a local or remote computer and determine if the 
-    system is pending a reboot, from either Microsoft Patching or a Software Installation. 
-    For Windows 2008+ the function will query the CBS registry key as another factor in determining 
-    pending reboot state.  "PendingFileRenameOperations" and "Auto Update\RebootRequired" are observed 
-    as being consistant across Windows Server 2003 & 2008. 
-   
-    CBServicing = Component Based Servicing (Windows 2008) 
-    WindowsUpdate = Windows Update / Auto Update (Windows 2003 / 2008) 
-    CCMClientSDK = SCCM 2012 Clients only (DetermineIfRebootPending method) otherwise $null value 
-    PendFileRename = PendingFileRenameOperations (Windows 2003 / 2008) 
- 
-.PARAMETER ComputerName 
-    A single Computer or an array of computer names.  The default is localhost ($env:COMPUTERNAME). 
- 
-.PARAMETER ErrorLog 
-    A single path to send error data to a log file. 
- 
-.EXAMPLE 
-    PS C:\> Get-PendingReboot -ComputerName (Get-Content C:\ServerList.txt) | Format-Table -AutoSize 
-   
-    Computer CBServicing WindowsUpdate CCMClientSDK PendFileRename PendFileRenVal RebootPending 
-    -------- ----------- ------------- ------------ -------------- -------------- ------------- 
-    DC01     False   False           False      False 
-    DC02     False   False           False      False 
-    FS01     False   False           False      False 
- 
-    This example will capture the contents of C:\ServerList.txt and query the pending reboot 
-    information from the systems contained in the file and display the output in a table. The 
-    null values are by design, since these systems do not have the SCCM 2012 client installed, 
-    nor was the PendingFileRenameOperations value populated. 
- 
-.EXAMPLE 
-    PS C:\> Get-PendingReboot 
-   
-    Computer     : WKS01 
-    CBServicing  : False 
-    WindowsUpdate      : True 
-    CCMClient    : False 
-    PendComputerRename : False 
-    PendFileRename     : False 
-    PendFileRenVal     :  
-    RebootPending      : True 
-   
-    This example will query the local machine for pending reboot information. 
-   
-.EXAMPLE 
-    PS C:\> $Servers = Get-Content C:\Servers.txt 
-    PS C:\> Get-PendingReboot -Computer $Servers | Export-Csv C:\PendingRebootReport.csv -NoTypeInformation 
-   
-    This example will create a report that contains pending reboot information. 
- 
-.LINK 
-    Component-Based Servicing: 
-    http://technet.microsoft.com/en-us/library/cc756291(v=WS.10).aspx 
-   
-    PendingFileRename/Auto Update: 
-    http://support.microsoft.com/kb/2723674 
-    http://technet.microsoft.com/en-us/library/cc960241.aspx 
-    http://blogs.msdn.com/b/hansr/archive/2006/02/17/patchreboot.aspx 
- 
-    SCCM 2012/CCM_ClientSDK: 
-    http://msdn.microsoft.com/en-us/library/jj902723.aspx 
- 
-.NOTES 
-    Author:  Brian Wilhite 
-    Email:   bcwilhite (at) live.com 
-    Date:    29AUG2012 
-    PSVer:   2.0/3.0/4.0/5.0 
-    Updated: 01DEC2014 
-    UpdNote: Added CCMClient property - Used with SCCM 2012 Clients only 
-       Added ValueFromPipelineByPropertyName=$true to the ComputerName Parameter 
-       Removed $Data variable from the PSObject - it is not needed 
-       Bug with the way CCMClientSDK returned null value if it was false 
-       Removed unneeded variables 
-       Added PendFileRenVal - Contents of the PendingFileRenameOperations Reg Entry 
-       Removed .Net Registry connection, replaced with WMI StdRegProv 
-       Added ComputerPendingRename 
-#> 
- 
-[CmdletBinding()] 
-param( 
-  [Parameter(Position=0,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)] 
-  [Alias("CN","Computer")] 
-  [String[]]$ComputerName="$env:COMPUTERNAME", 
-  [String]$ErrorLog 
-  ) 
- 
-Begin {  }## End Begin Script Block 
-Process { 
-  Foreach ($Computer in $ComputerName) { 
-  Try { 
-      ## Setting pending values to false to cut down on the number of else statements 
-      $CompPendRen,$PendFileRename,$Pending,$SCCM = $false,$false,$false,$false 
-       
-      ## Setting CBSRebootPend to null since not all versions of Windows has this value 
-      $CBSRebootPend = $null 
-             
-      ## Querying WMI for build version 
-      $WMI_OS = Get-WmiObject -Class Win32_OperatingSystem -Property BuildNumber, CSName -ComputerName $Computer -ErrorAction Stop 
- 
-      ## Making registry connection to the local/remote computer 
-      $HKLM = [UInt32] "0x80000002" 
-      $WMI_Reg = [WMIClass] "\\$Computer\root\default:StdRegProv" 
-             
-      ## If Vista/2008 & Above query the CBS Reg Key 
-      If ([Int32]$WMI_OS.BuildNumber -ge 6001) { 
-        $RegSubKeysCBS = $WMI_Reg.EnumKey($HKLM,"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\") 
-        $CBSRebootPend = $RegSubKeysCBS.sNames -contains "RebootPending"     
-      } 
-               
-      ## Query WUAU from the registry 
-      $RegWUAURebootReq = $WMI_Reg.EnumKey($HKLM,"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\") 
-      $WUAURebootReq = $RegWUAURebootReq.sNames -contains "RebootRequired" 
-             
-      ## Query PendingFileRenameOperations from the registry 
-      $RegSubKeySM = $WMI_Reg.GetMultiStringValue($HKLM,"SYSTEM\CurrentControlSet\Control\Session Manager\","PendingFileRenameOperations") 
-      $RegValuePFRO = $RegSubKeySM.sValue 
- 
-      ## Query ComputerName and ActiveComputerName from the registry 
-      $ActCompNm = $WMI_Reg.GetStringValue($HKLM,"SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName\","ComputerName")       
-      $CompNm = $WMI_Reg.GetStringValue($HKLM,"SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName\","ComputerName") 
-      If ($ActCompNm -ne $CompNm) { 
-    $CompPendRen = $true 
-      } 
-             
-      ## If PendingFileRenameOperations has a value set $RegValuePFRO variable to $true 
-      If ($RegValuePFRO) { 
-        $PendFileRename = $true 
-      } 
- 
-      ## Determine SCCM 2012 Client Reboot Pending Status 
-      ## To avoid nested 'if' statements and unneeded WMI calls to determine if the CCM_ClientUtilities class exist, setting EA = 0 
-      $CCMClientSDK = $null 
-      $CCMSplat = @{ 
-    NameSpace='ROOT\ccm\ClientSDK' 
-    Class='CCM_ClientUtilities' 
-    Name='DetermineIfRebootPending' 
-    ComputerName=$Computer 
-    ErrorAction='Stop' 
-      } 
-      ## Try CCMClientSDK 
-      Try { 
-    $CCMClientSDK = Invoke-WmiMethod @CCMSplat 
-      } Catch [System.UnauthorizedAccessException] { 
-    $CcmStatus = Get-Service -Name CcmExec -ComputerName $Computer -ErrorAction SilentlyContinue 
-    If ($CcmStatus.Status -ne 'Running') { 
-        Write-Warning "$Computer`: Error - CcmExec service is not running." 
-        $CCMClientSDK = $null 
-    } 
-      } Catch { 
-    $CCMClientSDK = $null 
-      } 
- 
-      If ($CCMClientSDK) { 
-    If ($CCMClientSDK.ReturnValue -ne 0) { 
-      Write-Warning "Error: DetermineIfRebootPending returned error code $($CCMClientSDK.ReturnValue)"     
-        } 
-        If ($CCMClientSDK.IsHardRebootPending -or $CCMClientSDK.RebootPending) { 
-      $SCCM = $true 
-        } 
-      } 
-       
-      Else { 
-    $SCCM = $null 
-      } 
- 
-      ## Creating Custom PSObject and Select-Object Splat 
-      $SelectSplat = @{ 
-    Property=( 
-        'Computer', 
-        'CBServicing', 
-        'WindowsUpdate', 
-        'CCMClientSDK', 
-        'PendComputerRename', 
-        'PendFileRename', 
-        'PendFileRenVal', 
-        'RebootPending' 
-    )} 
-      New-Object -TypeName PSObject -Property @{ 
-    Computer=$WMI_OS.CSName 
-    CBServicing=$CBSRebootPend 
-    WindowsUpdate=$WUAURebootReq 
-    CCMClientSDK=$SCCM 
-    PendComputerRename=$CompPendRen 
-    PendFileRename=$PendFileRename 
-    PendFileRenVal=$RegValuePFRO 
-    RebootPending=($CompPendRen -or $CBSRebootPend -or $WUAURebootReq -or $SCCM -or $PendFileRename) 
-      } | Select-Object @SelectSplat 
- 
-  } Catch { 
-      Write-Warning "$Computer`: $_" 
-      ## If $ErrorLog, log the file to a user specified location/path 
-      If ($ErrorLog) { 
-    Out-File -InputObject "$Computer`,$_" -FilePath $ErrorLog -Append 
-      }         
-  }       
-  }## End Foreach ($Computer in $ComputerName)       
-}## End Process 
- 
-End {  }## End End 
- 
-}## End Function Get-PendingReboot  
-
-function test01 () {
-    $objArray = @()
-    $number = 1
-    while (1) {
-        $obj = New-Object -Type psobject -Property @{
-            "data1" = $number
-            "data2" = $number+1
-            "data3" = $number +2
-        }
-        $objArray += $obj
-        $number++
-        Write-Output $obj
-        Start-Sleep -Seconds 1
-    }
-}
