@@ -6,6 +6,5 @@ $results = start-installation `
         -sitesFile   'C:\scripts\bootstrap\lab_sites.csv' `
         -siteCommandsFile 'C:\scripts\bootstrap\lab_siteCommands.csv' `
         -installScript 'C:\scripts\PsGenericAppInstaller\clientInstall_bootstrap.ps1'
-$sut  = (Split-Path -Leaf $MyInvocation.MyCommand.Path) -replace '\.Tests\.ps1', '.psm1'
 
 $results | Write-StatusReport -Filename 'results.csv'
