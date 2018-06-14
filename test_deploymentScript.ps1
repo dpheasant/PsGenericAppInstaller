@@ -29,5 +29,3 @@ foreach($i in 1..$iterations) {
 
     start-sleep -Seconds 1
 }
-
-write-host "Done."

@@ -13,4 +13,9 @@ Describe "GenericAppInstaller: Start-Installation" {
     It "correctly runs 50 jobs" {
         $results.completed | Should -Be 50
     }
+
+    It "writes the results file" {
+        $results | Write-StatusReport -file './results.csv'
+        test-path './results.csv' | Should -be $true
+    }
 }
