@@ -1,9 +1,3 @@
-#region VARIABLES
-
-#endregion
-
-#region INSTALL
-
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 import-module -Force (resolve-path "$here/modules/inputHandlers")
 
@@ -32,41 +26,52 @@ function start-installation {
 
     ## import the list of targets
     $targets   = import-targets -targetsFile $targetsFile -sitesFile $sitesFile -siteCommandsFile $siteCommandsFile
-    $jobStates = @{}
+
+    ## state object to store/manage job states and overall status info
+    $state = new-object -type PSObject -Property @{
+        progress  = 0
+        running   = 0
+        failed    = 0
+        completed = 0
+        remaining = 0
+        jobs      = @{}
+    }
 
     ## build a queue of targets
     $targetQueue = New-Object System.Collections.Queue -ArgumentList @(,$targets)
 
-    ## initialize some counters and enter main processing loop    
+    ## main processing loop    
     $shouldRun     = $true
-    $completedJobs = 0
-    $failedJobs    = 0
     while($shouldRun) {
-        ## initalize counters
+        ## initalize/zero counters
         $runningJobs = 0
+        $state.running = 0
 
         ## process completed/running/failed jobs
         foreach($job in (get-job -Name 'InstallJob:*')) {
+            
+            write-host ("{0} {1}" -f $job.name,$job.state)
+            Receive-Job $job | %{
+                $state.jobs[$job.name].output += $_
+            }
+
+            $state.jobs[$job.name].status = $job.State
+
             switch ($job.State) {
                 "Running" {
-                    write-host ("{0} {1}" -f $job.name,$job.state)
-                    Receive-Job $job | %{
-                        $jobStates[$job.name] = $_
-                    }
-                    $runningJobs++
+                    $state.jobs[$job.name].message = ('Script {0} running...' -f $installScript)
+                    $state.running++
                 }
 
                 "Completed" {
-                    write-host ("{0} {1}" -f $job.name,$job.state)
-                    $completedJobs++
-                    $jobStates.remove($job.name)
+                    $state.completed++
+                    $state.jobs[$job.name].message = ('Execution of {0} succeeded...' -f $installScript)
                     remove-job $job
                 }
 
                 "Failed" {
-                    write-host ("{0} {1}" -f $job.name,$job.state)
-                    $failedJobs++
-                    $jobStates.remove($job.name)
+                    $state.failed++
+                    $state.jobs[$job.name].message = ('Execution of {0} failed...' -f $installScript)
                     remove-job $job
                 }
             }
@@ -76,20 +81,22 @@ function start-installation {
         while($runningJobs -lt $parallelism -and $targetQueue.count -gt 0) {
             write-host ("starting job {0}" -f $target.fqdn)
             $target = $targetQueue.Dequeue()
+
             $job = ($target | start-job -name ('InstallJob:{0}' -f $target.fqdn) -FilePath $installScript)
-            $jobStates.add($job.name, 'Installation script started...')
-            $runningJobs++
+
+            $state.jobs[$job.name] = new-object -type PSObject -Property @{
+                target  = $target.fqdn
+                status  = $job.state
+                message = 'Installation script started...'
+                output  = @()
+            }
+
+            $state.running++
         }
 
-        ## buile state object
-        $state = @{
-            progress  = (($failedJobs + $completedJobs)/$targets.count)*100
-            jobs      = $jobStates
-            running   = $runningJobs
-            failed    = $failedJobs
-            completed = $completedJobs
-            remaining = $targetQueue.Count
-        }
+        ## update state object
+        $state.progress  = (($state.failed+ $state.completed)/$targets.count)*100
+        $state.remaining = $targetQueue.Count
 
         ## save job state to stateFile
         $state | Export-Clixml $statefile
@@ -103,7 +110,7 @@ function start-installation {
             $state.progress)
 
         ## if there are remaining jobs, sleep; otherwise we're finished
-        if($runningJobs -gt 0) {
+        if($state.running -gt 0) {
             start-sleep -m 500
         } else {
             $shouldRun = $false
@@ -155,44 +162,14 @@ function Start-StatusMonitor {
         catch {}
     }
 }
-#endregion
 
-#region MONITORING
+Function Write-StatusReport {
+    Param(
+        [Parameter(Mandatory=$true,ValueFromPipeline=$true)]
+        $results,
+        [Parameter(Mandatory=$true)]
+        [string] $filename
+    )
 
-function start-installationMonitoring {
-
+    $InputObject.jobs.values | select-object target,status | Export-Csv $filename
 }
-
-function get-installJobs {
-    
-}
-
-#endregion
-
-#region REMOTE
-
-function copy-installer {
-
-}
-
-function copy-gatherData {
-
-}
-
-function new-remoteStatusFile {
-
-}
-
-function get-remoteData {
-
-}
-
-function start-installer {
-
-}
-
-function update-statusFile {
-
-}
-
-#endregion
