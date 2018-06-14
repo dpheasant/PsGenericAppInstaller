@@ -8,7 +8,8 @@ $TARGET_PROPERTY_MAP = @(
     @{Name="fqdn" ; Expression = {$_."fqdn"}},
     "siteId",
     "siteCidr",
-    "command"
+    "executionCmdLine",
+    "outputPath"
 )
 
 $SITE_PROPERTY_MAP = @(
