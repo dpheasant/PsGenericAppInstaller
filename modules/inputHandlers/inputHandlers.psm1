@@ -63,7 +63,7 @@ function Import-Targets {
 
             $siteCommand = $siteCommands | Where-Object { $target.siteId -eq $_.siteId }
             if($siteCommand) {
-                $target.command = $siteCommand
+                $target.executionCmdLine = $siteCommand
             } else {
                 throw ("Unable to find site command for site {0}." -f $target.siteId)
             }
