@@ -1,5 +1,6 @@
 ﻿$logOutPutType = "CSV"
 $logShowLevel  = "debug"
+$logOutPutPath = $env:TEMP
 New-Alias log write-log -Force
 
 $clientDataSample = $null
@@ -33,17 +34,21 @@ function start-clientIntallTasks () {
         [string]$smbValidationTaskName = "smbValidate",
         [string]$msiInstallTaskName = "msiInstall",
         [int]$scheduledTaskCheckWaitInterval = 10,
-        [int]$maxScheduledTaskMonitorCount = 9999
+        [int]$maxScheduledTaskMonitorCount = 200,
+        [int]$maxRandomDelayWaitTimer = 30,
+        [switch]$doNotKillMsiProcessOnTimeout
     )
 
     begin {
         $pSDefaultParameterValues = @{'log:invocationName' = $myInvocation.invocationName
                                       'log:logShowLevel'   = $logShowLevel
                                       'log:outputType'     = $logOutPutType
+                                      'log:outputFilePath' = $logOutputPath
                                       'write-clientOutput:passThru' = $true}
         
     }
     process {
+        $pSDefaultParameterValues.Add('log:tag',$clientData.fqdn)
         "Starting client install tasks." | log
         $clientStatusObject = New-Object -Type psObject
         $clientStatusObject = $clientData
@@ -111,7 +116,7 @@ function start-clientIntallTasks () {
         $testCount = 1
         while ($testCount -le $maxInstallTestCount) {
             "Testing for running install process with input command line." | log -cf @{cmdLine = $clientData.executionCmdLine}
-            $installRunningScriptBlock = (Get-Command test-installProcessRunning).ScriptBlock
+            $installRunningScriptBlock = (Get-Command test-installProcessRunning).scriptBlock
             $invokeCmdParams = @{
                 session      = $clientPsSession
                 scriptBlock  = $installRunningScriptBlock
@@ -216,7 +221,7 @@ function start-clientIntallTasks () {
                 $invokeCmdParams = @{
                     session      = $clientPsSession
                     scriptBlock  = $schedTaskCreateScriptBlock
-                    argumentList = $smbValidationTaskName,$writeScript.destination
+                    argumentList = $smbValidationTaskName,"powerShell",$writeScript.destination
                 }
                 "Create scheduled task $smbValidationTaskName parameters defined." | log -l 6 -cf @{invokeCmdParams = $invokeCmdParams}
                 $createSchedTask = Invoke-Command @invokeCmdParams
@@ -317,24 +322,13 @@ function start-clientIntallTasks () {
                 $clientStatusObject | write-clientOutput | Write-Output
 
                 "Executing msi install for $($clientData.fqdn)." | log
-                "Writing msi install script to client." | log
-                $copyScriptParams = @{
-                    scriptString          = $clientData.executionCmdLine
-                    fileName              = "msiInstall.ps1"
-                    clientPSSession       = $clientPsSession
-                    clientInstallLocation = $clientInstallLocation
-                    fileStagingLocation   = $serverStagingPath
-                }
-                "Copy script for $msiInstallTaskName parameters defined." | log -l 6 -cf @{copyScriptParams = $copyScriptParams}
-                "Copy client script parameters created." | log -l 6 -cf @{copyScriptParams = $copyScriptParams}
-                $writeMsiScript = copy-clientInstallScript @copyScriptParams
-                "Copied msi install script to remote client." | log
                 "Creating scheduled task on client to run msi install script as local system." | log
                 $schedTaskCreateScriptBlock = (Get-Command new-clientScheduledTask).scriptBlock
+                $msiExecArgs = ($clientData.executionCmdLine) -replace ('msiexec ','')
                 $invokeCmdParams = @{
                     session      = $clientPsSession
                     scriptBlock  = $schedTaskCreateScriptBlock
-                    argumentList = $msiInstallTaskName,$writeMsiScript.destination
+                    argumentList = $msiInstallTaskName,'msiexec.exe',$msiExecArgs
                 }
                 "Create scheduled task $msiInstallTaskName parameters defined." | log -l 6 -cf @{invokeCmdParams = $invokeCmdParams}
                 $createSchedTask = Invoke-Command @invokeCmdParams
@@ -342,6 +336,10 @@ function start-clientIntallTasks () {
                 $clientStatusObject | Add-Member -MemberType NoteProperty -Name 'msiInstallStatus' -Value "Task Created" -Force
                 "Added msi install task status to client status object." | log -l 6 -cf @{'clientStatusObject' = $clientStatusObject}
                 $clientStatusObject | write-clientOutput | Write-Output
+                "Starting random delay timer between 1 and $maxRandomDelayWaitTimer seconds before running job." | log
+                $randomDelaySec = Get-Random -Maximum  $maxRandomDelayWaitTimer -Minimum 1
+                "Starting random delay wait time of $randomDelaySec seconds..." | log
+                Start-Sleep -Seconds $randomDelaySec
                 "Running scheduled task `"$msiInstallTaskName`" on remote client." | log
                 $schedTaskRunScriptBlock = (Get-Command start-clientScheduledTask).scriptBlock
                 $invokeCmdParams = @{
@@ -388,6 +386,29 @@ function start-clientIntallTasks () {
                     $clientStatusObject | write-clientOutput | Write-Output
                     "Starting sleep for $scheduledTaskCheckWaitInterval seconds before re-checking scheduled task $msiInstallTaskName." | log
                     Start-Sleep -Seconds $scheduledTaskCheckWaitInterval
+                    if (!$doNotKillMsiProcessOnTimeout -and ($monitorCount -eq $maxScheduledTaskMonitorCount)) {
+                        "Max check attempts of $maxScheduledTaskMonitorCount reached! Attempting to kill process associated with `"$($clientData.executionCmdLine)`"..." | log
+                        $findProcessScriptBlock = [scriptBlock]::Create("(Get-WmiObject win32_process | Where-Object {`$_.commandLine -like `"*msiexec.exe $msiExecArgs*`"}).processId")
+                        $invokeCmdParams = @{
+                            session      = $clientPsSession
+                            scriptBlock  = $findProcessScriptBlock
+                        }
+                        "Find process parameters defined." | log -l 6 -cf @{invokeCmdParams = $invokeCmdParams}
+                        $findProcess = Invoke-Command @invokeCmdParams
+                        if ($findProcess -or ($findProcess.length -gt 1)) {
+                            "Process found with Id $findProcess. Killing process..." | log
+                            $killProcessScriptBlock = [scriptBlock]::Create("taskKill /pid $findProcess /f")
+                            $invokeCmdParams = @{
+                                session      = $clientPsSession
+                                scriptBlock  = $killProcessScriptBlock
+                            }
+                            "Kill process parameters defined." | log -l 6 -cf @{invokeCmdParams = $invokeCmdParams}
+                            $killProcess = Invoke-Command @invokeCmdParams
+                            "Process with PID $findProcess killed!" | log
+                        } else {
+                            "No or multiple processes matching `"$($clientData.executionCmdLine)`". Will not stop process." | log -l 3
+                        }
+                    }
                 } until ($monitorSchedTask -eq "Ready" -or ($monitorCount -eq $maxScheduledTaskMonitorCount))
                 "Removing scheduled task `"$smbValidationTaskName`"." | log
                 $schedTaskRemoveScriptBlock = (Get-Command remove-clientScheduledTask).scriptBlock
@@ -424,10 +445,12 @@ function set-clientEnvironment () {
     begin {
         $pSDefaultParameterValues = @{'log:invocationName' = $myInvocation.invocationName
                                       'log:logShowLevel'   = $logShowLevel
+                                      'log:outputFilePath' = $logOutputPath
                                       'log:outputType'     = $logOutPutType}
     }
 
     process {
+        $pSDefaultParameterValues.Add('log:tag',$clientPSSession.computerName)
         $cmdInvokeParams = @{
             session     = $clientPSSession
             scriptBlock = [scriptBlock]::Create("Test-Path -Path $clientInstallLocation")
@@ -475,6 +498,7 @@ function copy-installConfigFile () {
     begin {
         $pSDefaultParameterValues = @{'log:invocationName' = $myInvocation.invocationName
                                       'log:logShowLevel'   = $logShowLevel
+                                      'log:outputFilePath' = $logOutputPath
                                       'log:outputType'     = $logOutPutType}
         $fileNameWithExt = "$fileName.json"
         $stagingFilePath = Join-Path $fileStagingLocation -ChildPath $fileNameWithExt
@@ -482,6 +506,7 @@ function copy-installConfigFile () {
     }
 
     process {
+        $pSDefaultParameterValues.Add('log:tag',$clientData.fqdn)
         $clientDataJson = $clientData | ConvertTo-Json 
         $jsonFileParams = @{
             filePath = $stagingFilePath
@@ -548,6 +573,7 @@ function copy-clientInstallScript () {
     begin {
         $pSDefaultParameterValues = @{'log:invocationName' = $myInvocation.invocationName
                                       'log:logShowLevel'   = $logShowLevel
+                                      'log:outputFilePath' = $logOutputPath
                                       'log:outputType'     = $logOutPutType}
 
         $stagingFilePath = Join-Path $fileStagingLocation -ChildPath $fileName
@@ -555,6 +581,7 @@ function copy-clientInstallScript () {
     }
 
     process {
+        $pSDefaultParameterValues.Add('log:tag',$clientPSSession.computerName)
         $scriptFileParams = @{
             filePath    = $stagingFilePath
             encoding    = "utf8"
@@ -619,10 +646,12 @@ function new-clientPsSession () {
     begin {
         $pSDefaultParameterValues = @{'log:invocationName' = $myInvocation.invocationName
                                       'log:logShowLevel'   = $logShowLevel
+                                      'log:outputFilePath' = $logOutputPath
                                       'log:outputType'     = $logOutPutType}
     }
 
     process {
+        $pSDefaultParameterValues.Add('log:tag',$clientData.fqdn)
         if ($removeExistingSessions) {
             $currentSessions = Get-PSSession
             $currentSessions = $currentSessions | Where-Object {$_.computerName -eq $clientData.fqdn}
@@ -655,10 +684,12 @@ function write-clientOutput () {
     begin {
         $pSDefaultParameterValues = @{'log:invocationName' = $myInvocation.invocationName
                                       'log:logShowLevel'   = $logShowLevel
+                                      'log:outputFilePath' = $logOutputPath
                                       'log:outputType'     = $logOutPutType}
     }
 
     process {
+        $pSDefaultParameterValues.Add('log:tag',$clientOutputData.fqdn)
         $fileName = "$((($clientOutputData.fqdn).split('.'))[0]).csv"
         $fullOutputPath = Join-Path $clientOutputData.outputPath -ChildPath $fileName
         if (Test-Path $fullOutputPath) {
@@ -680,7 +711,7 @@ function write-clientOutput () {
 
 function test-installProcessRunning ([string]$executionCmdLine) { 
     $processes = Get-WmiObject Win32_Process
-    $matchingProcess = $processes.commandLine | Where-Object {$_ -eq $executionCmdLine}
+    $matchingProcess = $processes.commandLine | Where-Object {$_ -like "*$executionCmdLine*"}
     if ($matchingProcess) {
         return $true
     } else {
@@ -717,11 +748,7 @@ function test-packageInstalled ([string]$packageID,[string[]]$detectionScript) {
     return $installed
 }
 
-function new-clientScheduledTask ([string]$taskName,[string]$scriptPath) {
-
-    $taskCommand = 'powerShell'
-    $taskArg = $scriptPath
- 
+function new-clientScheduledTask ([string]$taskName,[string]$taskCommand,[string]$taskArg) {
     $service = New-Object -ComObject("Schedule.Service")
 
     $service.Connect()

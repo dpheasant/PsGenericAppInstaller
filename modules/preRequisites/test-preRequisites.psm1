@@ -1,5 +1,6 @@
 ﻿$logOutPutType = "CSV"
 $logShowLevel  = "info"
+$logOutputPath = $env:TEMP
 New-Alias log write-log -Force
 
 
@@ -66,19 +67,21 @@ function test-preRequisites () {
     begin {
         $pSDefaultParameterValues = @{'log:invocationName' = $myInvocation.invocationName
                                       'log:logShowLevel'   = $logShowLevel
+                                      'log:outputFilePath' = $logOutputPath
                                       'log:outputType'     = $logOutPutType}
         $testPreReqResult = "" | Select-Object "clientFqdn","dnsTest","connectionTest","remotePsTest","smbTest"
         "Test Result psObject created." | log -l 6 -cf @{'testPreReqResult' = $testPreReqResult}
     }
 
     process {
+        $pSDefaultParameterValues.Add('log:tag',$clientFQDN)
         "Starting pre-requisites test for client: $clientFQDN" | log
         $testPreReqResult.clientFqdn = $clientFQDN
         "Client FQDN set." | log -l 6 -cf @{'testPreReqResult' = $testPreReqResult}
 
         "Starting dns test for $clientFQDN." | log
         $dnsTestParams = @{ clientFqdn = $clientFQDN }
-        if ($dnsServer) {$dnsTestParams.Add("dnsServer",$dnsServer); "Using dns server: $dnsServer" | log}
+        if ($dnsServer) {$dnsTestParams.Add("dnsServer",$dnsServer); "$clientFQDN using dns server: $dnsServer" | log}
         "DNS test parameter block complete" | log -l 6 -cf @{'dnsParams' = $dnsTestParams}
         $testPreReqResult.dnsTest = test-dns @dnsTestParams
         if ($testPreReqResult.dnsTest) {
@@ -86,32 +89,32 @@ function test-preRequisites () {
         } else {
             "DNS check complete: $($testPreReqResult.dnsTest)" | log -l 3
         }
-        "DNS check set." | log -l 6 -cf @{'testPreReqResult' = $testPreReqResult}
+        "DNS check for $clientFQDN set." | log -l 6 -cf @{'testPreReqResult' = $testPreReqResult}
 
         "Starting connection test for $clientFQDN." | log
         $connectionTestParams = @{ clientFqdn = $clientFQDN }
-        "Connection test parameter block complete" | log -l 6 -cf @{'connectionTestParams' = $connectionTestParams}
+        "Connection test parameter block for $clientFQDN complete" | log -l 6 -cf @{'connectionTestParams' = $connectionTestParams}
         $testPreReqResult.connectionTest = test-connection @connectionTestParams
         if ($testPreReqResult.connectionTest) {
-            "Connection test check complete: $($testPreReqResult.connectionTest)" | log
+            "Connection test check for $clientFQDN complete: $($testPreReqResult.connectionTest)" | log
         } else {
-            "Connection test check complete: $($testPreReqResult.connectionTest)" | log -l 3
+            "Connection test check for $clientFQDN complete: $($testPreReqResult.connectionTest)" | log -l 3
         }
-        "Connection check set." | log -l 6 -cf @{'testPreReqResult' = $testPreReqResult}
+        "Connection check for $clientFQDN set." | log -l 6 -cf @{'testPreReqResult' = $testPreReqResult}
 
         "Starting remotePs test for $clientFQDN." | log
         $remotePsTestParams = @{  
             clientFqdn   = $clientFQDN
             wsManPort = $remotePsPort
         }
-        "Remote PS test parameter block complete" | log -l 6 -cf @{'remotePSTestParams' = $remotePsTestParams}
+        "Remote PS test parameter block for $clientFQDN complete" | log -l 6 -cf @{'remotePSTestParams' = $remotePsTestParams}
         $testPreReqResult.remotePsTest = test-remotePs @remotePsTestParams
         if ($testPreReqResult.remotePsTest) {
-            "Remote PS test check complete: $($testPreReqResult.remotePsTest)" | log
+            "Remote PS test for $clientFQDN check complete: $($testPreReqResult.remotePsTest)" | log
         } else {
-            "Remote PS test check complete: $($testPreReqResult.remotePsTest)" | log -l 3
+            "Remote PS test for $clientFQDN check complete: $($testPreReqResult.remotePsTest)" | log -l 3
         }
-        "Remote PS check set." | log -l 6 -cf @{'testPreReqResult' = $testPreReqResult}
+        "Remote PS check for $clientFQDN set." | log -l 6 -cf @{'testPreReqResult' = $testPreReqResult}
 
         if (!$noSmbTest) {
             "Starting SMB test for $clientFQDN." | log
@@ -121,16 +124,16 @@ function test-preRequisites () {
                 smbPort         = $smbPort
                 clientShareName = $smbShareName
             }
-            "SMB test parameter block complete" | log -l 6 -cf @{'smbTestParams' = $smbTestParams}
+            "SMB test parameter block for $clientFQDN complete" | log -l 6 -cf @{'smbTestParams' = $smbTestParams}
             $testPreReqResult.smbTest = test-smb @smbTestParams
             if ($testPreReqResult.smbTest) {
-                "SMB test check complete: $($testPreReqResult.smbTest)" | log
+                "SMB test check for $clientFQDN complete: $($testPreReqResult.smbTest)" | log
             } else {
-                "SMB PS test check complete: $($testPreReqResult.smbTest)" | log -l 3
+                "SMB PS test check for $clientFQDN complete: $($testPreReqResult.smbTest)" | log -l 3
             }
         } else {
             $testPreReqResult.smbTest = "Not Tested"
-            "SMB test flag set to not test. Skipped SMB test." | log
+            "SMB test flag for $clientFQDN set to not test. Skipped SMB test." | log
         }
         "SMB check set." | log -l 6 -cf @{'testPreReqResult' = $testPreReqResult}
     }
@@ -154,11 +157,13 @@ function test-dns () {
     begin {
         $pSDefaultParameterValues = @{'log:invocationName' = $myInvocation.invocationName
                                       'log:logShowLevel'   = $logShowLevel
+                                      'log:outputFilePath' = $logOutputPath
                                       'log:outputType'     = $logOutPutType}
         $dnsTestResult = $false
     }
 
     process {
+        $pSDefaultParameterValues.Add('log:tag',$clientFQDN)
         $dnsParams = @{
             name         = $clientFQDN
             type         = $dnsRecordType
@@ -192,19 +197,21 @@ function test-connection () {
     begin {
         $pSDefaultParameterValues = @{'log:invocationName' = $myInvocation.invocationName
                                       'log:logShowLevel'   = $logShowLevel
+                                      'log:outputFilePath' = $logOutputPath
                                       'log:outputType'     = $logOutPutType}
     }
 
     process {
+        $pSDefaultParameterValues.Add('log:tag',$clientFQDN)
         $connectionParams = @{
             computerName     = $clientFQDN
             informationLevel = "Quiet"
             warningAction    = "silentlyContinue"
         }
         try {
-            $ProgressPreference=’SilentlyContinue’
+            $global:ProgressPreference=’SilentlyContinue’
             $connectionTest = Test-NetConnection @connectionParams -ErrorAction Stop
-            $ProgressPreference=’Continue’
+            $global:ProgressPreference=’Continue’
         } catch {}
     }
 
@@ -225,10 +232,12 @@ function test-tcpPort () {
     begin {
         $pSDefaultParameterValues = @{'log:invocationName' = $myInvocation.invocationName
                                       'log:logShowLevel'   = $logShowLevel
+                                      'log:outputFilePath' = $logOutputPath
                                       'log:outputType'     = $logOutPutType}
     }
 
     process {
+        $pSDefaultParameterValues.Add('log:tag',$clientFQDN)
         $tcpPortParams = @{
             computerName     = $clientFQDN
             informationLevel = "Quiet"
@@ -236,9 +245,9 @@ function test-tcpPort () {
             warningAction    = "silentlyContinue"
         }
         try {
-            $ProgressPreference=’SilentlyContinue’
+            $global:ProgressPreference=’SilentlyContinue’
             $tcpPortTest = Test-NetConnection @tcpPortParams -ErrorAction Stop
-            $ProgressPreference=’Continue’
+            $global:ProgressPreference=’Continue’
         } catch {}
     }
 
@@ -260,11 +269,13 @@ function test-smb () {
     begin {
         $pSDefaultParameterValues = @{'log:invocationName' = $myInvocation.invocationName
                                       'log:logShowLevel'   = $logShowLevel
+                                      'log:outputFilePath' = $logOutputPath
                                       'log:outputType'     = $logOutPutType}
         $smbTest = $false
     }
 
     process {
+        $pSDefaultParameterValues.Add('log:tag',$clientFQDN)
         $tcpPortParams = @{
             clientFqdn       = $clientFQDN
             port             = $smbPort
@@ -295,11 +306,13 @@ function test-remotePs () {
     begin {
         $pSDefaultParameterValues = @{'log:invocationName' = $myInvocation.invocationName
                                       'log:logShowLevel'   = $logShowLevel
+                                      'log:outputFilePath' = $logOutputPath
                                       'log:outputType'     = $logOutPutType}
         $remotePsTest = $false
     }
 
     process {
+        $pSDefaultParameterValues.Add('log:tag',$clientFQDN)
         $tcpPortParams = @{
             clientFqdn       = $clientFQDN
             port             = $wsManPort

@@ -85,10 +85,12 @@ function write-log () {
         $invocationName,
         [alias('cf')]
         [hashtable]$customField,
+        [alias('t')]
+        [string]$tag,
         [validateSet("none","psObject","CSV","JSON")]
         [string]$outputType = "JSON",
         [string]$outputFilePath = $env:TEMP,
-        [string]$outputFileName = "$(Get-Date -Format FileDateUniversal)",
+        [string]$outputFileName = "psGenericAppInstallerLog_$(Get-Date -Format FileDateUniversal)",
         [bool]$showConsole = $true,
         [bool]$outputFile = $true,
         [switch]$passThru,
@@ -109,12 +111,13 @@ function write-log () {
     process {
         if (!$message -or ($outputType -eq "none")) {break}
         if ($level -le ($levelMap.keys | ?{$levelMap[$_] -eq $logShowLevel})) {
-            $output = "" | Select-Object "timestamp","level","function","message"
+            $output = "" | Select-Object "timestamp","level","function","tag","message"
             $output.timestamp = (Get-Date).DateTime
             $output.level     = $($levelMap[$level])
             $output.function  = $invocationName
+            $output.tag       = $tag
             $output.message   = $message
-            $consoleOutput = "$($output.timestamp)`t$($output.level)`t$($output.function)`t$($output.message)"
+            $consoleOutput = "$($output.timestamp)`t|`t$($output.level)`t|`t$($output.function)`t|`t$($output.tag)`t|`t$($output.message)"
 
             if ($customField) {
                 $customField.keys.forEach({
@@ -124,7 +127,7 @@ function write-log () {
                         value      = $customField[$_]
                     }
                     $output | Add-Member @memberParams
-                    $consoleOutput += "`t$_ = $($customField[$_] | Out-String)"
+                    $consoleOutput += "`t|`t$_ = $($customField[$_] | Out-String)"
                 })
             }
 
