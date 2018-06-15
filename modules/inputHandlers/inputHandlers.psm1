@@ -6,17 +6,7 @@ import-module -Force (resolve-path "$here/../utils")
 $TARGET_PROPERTY_MAP = @(
     @{Name="ip"   ; Expression = {$_."ip"}},
     @{Name="fqdn" ; Expression = {$_."fqdn"}},
-    "siteId",
-    "siteCidr",
-    "logfileRegex",
-    "logFileSearchScript",
-    "packageLocation",
-    "executionCmdLine",
-    "logFileLocation",
-    "packageID",
-    "detectionScript",
-    "outputPath"
-
+    "siteId"
 )
 
 $SITE_PROPERTY_MAP = @(
@@ -62,25 +52,18 @@ function Import-Targets {
             ## look up the target's site ID by matching it's ip to the site's CIDR address
             $site = $sites | where-object { Test-CidrMembership $target.ip $_.networkCidr }
             if($site) {
-                $target.siteId   = $site.id
-                $target.siteCidr = $site.networkCidr
+                $target.siteId = $site.id
+
+                ## copy remaining properties from $site to $target
+                $target | Copy-ObjectProperty -SourceObject $site -ExcludeProperties @('id')
             } else {
                 throw ("Unable to find site for target {0}({1})." -f $target.fqdn,$target.ip)
             }
 
             $siteCommand = $siteCommands | Where-Object { $target.siteId -eq $_.siteId }
             if($siteCommand) {
-                $target.executionCmdLine = $siteCommand
-
-                $target.siteId              = $siteCommand.siteId
-                $target.logfileRegex        = $siteCommand.logfileRegex
-                $target.logFileSearchScript = $siteCommand.logFileSearchScript
-                $target.packageLocation     = $siteCommand.packageLocation
-                $target.executionCmdLine    = $siteCommand.executionCmdLine
-                $target.logFileLocation     = $siteCommand.logFileLocation
-                $target.packageID           = $siteCommand.packageID
-                $target.detectionScript     = $siteCommand.detectionScript
-                $target.outputPath          = $siteCommand.outputPath
+                ## copy all properties from $siteCommand to $target
+                $target | Copy-ObjectProperty -SourceObject $siteCommand -ExcludeProperties @('siteId')
 
             } else {
                 throw ("Unable to find site command for site {0}." -f $target.siteId)
@@ -92,3 +75,4 @@ function Import-Targets {
         throw $_
     }
 }
+

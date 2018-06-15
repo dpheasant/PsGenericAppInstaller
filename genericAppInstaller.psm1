@@ -44,17 +44,23 @@ function start-installation {
     $shouldRun     = $true
     while($shouldRun) {
         ## initalize/zero counters
-        $runningJobs = 0
         $state.running = 0
 
         ## process completed/running/failed jobs
         foreach($job in (get-job -Name 'InstallJob:*')) {
             
-            write-host ("{0} {1}" -f $job.name,$job.state)
             Receive-Job $job | %{
                 $state.jobs[$job.name].output += $_
             }
 
+            ## see if job state changed
+            if($state.jobs[$job.name].status -ne $job.State){
+                $oldState = $state.jobs[$job.name].status
+                $newState = $job.State
+                write-host ("{0} changed state from {1} to {2}" -f $job.name,$oldState,$newState)
+            }
+
+            ## update job state
             $state.jobs[$job.name].status = $job.State
 
             switch ($job.State) {
@@ -78,7 +84,7 @@ function start-installation {
         }
 
         ## start new jobs
-        while($runningJobs -lt $parallelism -and $targetQueue.count -gt 0) {
+        while($state.running -lt $parallelism -and $targetQueue.count -gt 0) {
             write-host ("starting job {0}" -f $target.fqdn)
             $target = $targetQueue.Dequeue()
 

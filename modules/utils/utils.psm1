@@ -30,3 +30,48 @@ function Get-SubnetMaskFromCIDRPrefix {
     [Array]::Reverse($maskBytes) # Convert byte array to network order (most->least sigficant)
     return [IPAddress]$maskBytes
 }
+
+function Copy-ObjectProperty {
+    Param(
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
+        [object] $InputObject,
+
+        [Parameter(Mandatory=$true)]
+        [object] $SourceObject,
+
+        [Parameter(Mandatory=$false)]
+        [string[]] $IncludeProperties,
+
+        [Parameter(Mandatory=$false)]
+        [string[]] $ExcludeProperties,
+
+        [Parameter(Mandatory=$false)]
+        [switch] $NoClobber
+    )
+
+    begin {
+        ## build a list of property names to copy
+        if($IncludeProperties) {
+            $properties = $IncludeProperties
+        } else {
+            $properties = $sourceObject | Get-Member -type Properties | Select-Object -ExpandProperty Name
+        }
+
+        ## filter excluded properties
+        $properties = $properties | ?{$ExcludeProperties -notcontains $_}
+    }
+
+    process {
+        ## list InputObject's existing properties
+        $inputProperties = $InputObject | Get-Member -type Properties | Select-Object -ExpandProperty Name
+
+        ## copy/add SourceObject properties to InputObject
+        foreach($property in $properties) {
+            if(($inputProperties -contains $property) -and (-not $NoClobber)) {
+                $InputObject."$property" = $sourceObject."$property"
+            } elseif($inputProperties -notcontains $property) {
+                $InputObject | add-member -type NoteProperty -Name $property -Value $sourceObject."$property"
+            }
+        }
+    }
+}

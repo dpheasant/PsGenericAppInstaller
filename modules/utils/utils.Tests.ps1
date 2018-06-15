@@ -29,3 +29,46 @@ Describe "utils: Get-SubnetMaskFromCIDRPrefix" {
         { Get-SubnetMaskFromCIDRPrefix 34 } | Should -Throw
     }
 }
+
+Describe "utils: Copy-ObjectProperty" {
+
+    $sourceObj = New-Object -type PSObject -Property @{
+        prop1 = 'value1'
+        prop2 = @(1,2,3,4)
+        prop3 = @{a='a'; b='b'; c='c'}
+        prop4 = New-Object -type PSObject -Property @{subprop1='sub-property value 1'}
+    }
+
+    $sourceProps = $sourceObj | Get-Member -type Properties | Select-Object -ExpandProperty Name
+
+    It "copies all properties to object" {
+        $destObj = new-object -type psobject
+        $destObj | Copy-ObjectProperty -SourceObject $sourceObj
+        $destProps = $destObj | Get-Member -type Properties | Select-Object -ExpandProperty Name
+
+        $sourceProps | ?{$destProps -notcontains $_} | Should -Be @()
+    }
+
+    It "excludes properties from copy" {
+        $destObj = new-object -type psobject
+        $destObj | Copy-ObjectProperty -SourceObject $sourceObj -ExcludeProperties 'prop1'
+        $destProps = $destObj | Get-Member -type Properties | Select-Object -ExpandProperty Name
+
+        $sourceProps | ?{$destProps -notcontains $_} | Should -Be @('prop1')
+    }
+
+    It "clobbers properties during copy" {
+        $destObj = new-object -type psobject -Property @{prop1="Clobber me!"}
+        $destObj | Copy-ObjectProperty -SourceObject $sourceObj
+        
+        $destObj.prop1 | Should -Be "value1"
+    }
+
+    It "doesn't clobber properties during copy" {
+        $destObj = new-object -type psobject -Property @{prop1="Don't clobber me!"}
+        $destObj | Copy-ObjectProperty -SourceObject $sourceObj -NoClobber
+        
+        $destObj.prop1 | Should -Be "Don't clobber me!"
+    }
+
+}
