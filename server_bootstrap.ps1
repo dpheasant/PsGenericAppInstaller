@@ -6,7 +6,6 @@ $results = start-installation `
         -sitesFile   (Join-Path $inputParentPath -ChildPath 'lab_sites.csv') `
         -siteCommandsFile (Join-Path $inputParentPath -ChildPath 'lab_siteCommands.csv') `
         -installScript "$here\clientInstall_bootstrap.ps1"
-        #-installScript 'C:\scripts\PsGenericAppInstaller\clientInstall_bootstrap.ps1' 
         
 
 $results | Write-StatusReport -Filename 'results.csv'

@@ -3,7 +3,6 @@ Param(
     $InputObject
 )
 
-#$here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $here = "C:\scripts\PsGenericAppInstaller"
 
 import-module -Force (resolve-path "$here/modules/clientInstall/clientinstall.psm1")

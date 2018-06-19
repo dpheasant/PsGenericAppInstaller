@@ -3,22 +3,102 @@ $logShowLevel  = "debug"
 $logOutPutPath = $env:TEMP
 New-Alias log write-log -Force
 
+#This section can be used to test the start-clientInstall with dummy data. 
 $clientDataSample = $null
 $clientDataSample = New-Object -Type psObject -Property @{
-    'fqdn'                = 'ws04.lab2.qtr.ad'
-    'siteId'              = 'Site1'
-    'ip'                  = '10.100.72.225'
-    'siteCidr'            = '10.100.72.225/32'
-    'logFileRegEx'        = 'Client installation completed SUCCESSFULLY'
+    'fqdn'                = ''
+    'siteId'              = ''
+    'ip'                  = ''
+    'siteCidr'            = ''
+    'logFileRegEx'        = ''
     'logFileSearchScript' = ''
-    'logFileLocation'     = "$env:TEMP\AdaptivaClientSetup.LOG"
-    'executionCmdLine'    = 'msiexec /i \\file01\share02\msi\npp.msi /q /norestart'
-    'packageLocation'     = '\\file01\share02\msi\'
-    'packageID'           = '622E78B5-9B2F-412D-86CD-FDD72A3154BA'
-    'detectionScript'     = 'Test-Path HKLM:\SYSTEM\Software\'
-    'outputPath'          = 'C:\scripts\output'
+    'logFileLocation'     = ''
+    'executionCmdLine'    = ''
+    'packageLocation'     = ''
+    'packageID'           = ''
+    'detectionScript'     = ''
+    'outputPath'          = ''
 }
 
+
+<#
+.Synopsis
+   This is the primary parent function for for installing a remote msi. It is intended to be passed data via the server side bootstrap commands.
+.EXAMPLE
+   ***server_bootstrap.ps1***
+   $here = Split-Path -Parent $MyInvocation.MyCommand.Path
+    import-module -Force (resolve-path "$here/genericAppInstaller.psd1")
+    $inputParentPath = 'C:\scripts\bootstrap\'
+    $results = start-installation `
+            -targetsFile (Join-Path $inputParentPath -ChildPath 'lab_targets.csv') `
+            -sitesFile   (Join-Path $inputParentPath -ChildPath 'lab_sites.csv') `
+            -siteCommandsFile (Join-Path $inputParentPath -ChildPath 'lab_siteCommands.csv') `
+            -installScript "$here\clientInstall_bootstrap.ps1"
+        
+
+    $results | Write-StatusReport -Filename 'results.csv'
+
+   ***clientInstall_bootstrap.ps1***
+   Param(
+        [Parameter(ValueFromPipeline=$true)]
+        $InputObject
+    )
+
+    $here = "C:\scripts\PsGenericAppInstaller"
+
+    import-module -Force (resolve-path "$here/modules/clientInstall/clientinstall.psm1")
+    import-module -Force (resolve-path "$here/modules/logging/write-log.psm1")
+    import-module -Force (resolve-path "$here/modules/preRequisites/test-prerequisites.psm1")
+
+    ## modify line below to start client-side install script
+    $InputObject | start-clientIntallTasks
+
+    This example show generic usage of the function with the provided bootstrap scripts.
+.PARAMETER clientData
+   This is the object passed from the server side functions. It should have the properties:
+    @{
+    'fqdn'                = ''
+    'siteId'              = ''
+    'ip'                  = ''
+    'siteCidr'            = ''
+    'logFileRegEx'        = ''
+    'logFileSearchScript' = ''
+    'logFileLocation'     = ''
+    'executionCmdLine'    = ''
+    'packageLocation'     = ''
+    'packageID'           = ''
+    'detectionScript'     = ''
+    'outputPath'          = ''
+    }
+.PARAMETER serverStagingPath
+    This is a working directory on the server where any local server files can be staged prior to copying to client.
+.PARAMETER clientInstallLocation
+    This is a working directory on the client for any required local files.
+.PARAMETER sessionCredential
+    This is an optional parameter for credentials to use when opening up a powershell session between server and client.
+.PARAMETER sessionAuth
+    This is an optional parameter for the authorization mechanism to use with the supplied credential.
+.PARAMETER noLogSearch
+    This switch will prevent the script from parsing any log files. Could be useful in the case of large files causing performance issues.
+.PARAMETER installTestWaitInterval
+    This is the wait interval (in seconds) between testing if the package has been successfully installed on the client.
+.PARAMETER maxInstallTestCount
+    This is the maximum number of attempts the script will make to test the install status before failing and ending the job.
+.PARAMETER installRunningTestWaitInterval
+     This is the wait interval (in seconds) between testing if the currently running install process has completed.
+.PARAMETER smbValidationTaskName
+    This parameter defines the name of the task that will be used on the client system when determining if smb connectivity to the defined share exists.
+.PARAMETER msiInstallTaskName
+    This parameter defines the name of the task that will be used on the client system when launching the msiexec command to install the package.
+.PARAMETER scheduledTaskCheckWaitInterval
+    This is the wait interval (in seconds) between testing if a created scheduled task on a remote system has changed state.
+.PARAMETER maxScheduledTaskMonitorCount
+    This is the maximum number of times the function will test for a status change on a scheduled task before breaking the loop.
+.PARAMETER maxRandomDelayWaitTimer
+    This is the maximum time (in seconds) for a random delay timer to start a scheduled task on a remote client.
+.PARAMETER doNotKillMsiProcessOnTimeout
+    This switch will not allow the script to kill the remote process defined by the execution command line input.
+#>
 function start-clientIntallTasks () {
     [cmdletBinding()]
     param (
