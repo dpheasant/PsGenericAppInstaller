@@ -2,10 +2,22 @@
 This powershell module is intended to provide a generic platform for running powershell (installation) scripts against a large number of clients (targets).
 
 ## Architecture
-This module is itself modularized so that components may easily be replaced/enhanced without affecting other portions of the script.
+This module is itself modularized so that components may easily be replaced/enhanced without affecting other portions of the script. The solution itself is divided into 2 major sections, the 'server' side and the 'client' side. The server side is primarily responsible for loading the input, building a queue of jobs, executing those jobs, and all necessary input/output/housekeeping around them. The majority of the server code resides in the `genericAppInstaller.psm1` module.
 
-Sub-Modules:
+The client side is responsible for carrying out all client-side tasks including any pre-requisite checks and client-level status reporting.
+
+Sub-Modules and boostrap scripts:
 - InputHandlers: This module is responsible for parsing the input files and returning an object that will eventually be passed to the main installation script. Essentially, this object should contain all the information necessary for the installation script to operate.
+
+- Utils: All shared utility functions are in this module.
+
+- Logging: All logging can be controlled thorugh modification of this module.
+
+- ClientInstall: This is the main client-side installation module that handles/defines all of the actions to be performed on a remote host.
+
+- server_bootstrap.ps1: This script bootstraps the entire solution and is the main point of entry. Any modification to input files/arguments and output should be made here.
+
+- clientInstall_bootstrap.ps1: This script bootstraps the client-side scripts/modules and is called by the server-side code. When called, the server code passes a single object to the script that contains all necessary information/arguments for the script to complete its tasks.
 
 ## High-Level operation
 After importing the module itself, the installation process is started by calling `start-installation`. For example:
